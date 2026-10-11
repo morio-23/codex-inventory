@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Local secrets and environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and runtime state
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+coverage/
+.tmp/
+playwright-report/
+test-results/
+
+# Generated desktop EXEs (built locally on Windows)
+dist/
+desktop/dist/
+desktop/out/
+
+# Local Codex credentials and developer-only release evidence
+.codex/
+release-evidence/
+*.pfx
+*.p12
+
+# Never commit compiled Windows builds (attach verified binaries to GitHub Releases)
+*.exe
+*.msi

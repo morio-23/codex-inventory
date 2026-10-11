@@ -1,0 +1,67 @@
+{
+  "name": "codex-inventory-desktop",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Codex Inventory standalone Windows desktop distribution",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "pack:win": "electron-builder --win dir --x64",
+    "dist:win": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "net.codexinventory.desktop",
+    "productName": "Codex Inventory",
+    "asar": true,
+    "compression": "normal",
+    "files": [
+      "main.cjs",
+      "smoke-profile.cjs",
+      "codex-detect.mjs",
+      "package.json",
+      "preload.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "inventory",
+        "filter": [
+          "app-server-client.mjs",
+          "codex-service.mjs",
+          "local-tools.mjs",
+          "model-selection.mjs",
+          "project-tools.mjs",
+          "prompt-templates.mjs",
+          "reset-credit-service.mjs",
+          "script-approvals.mjs",
+          "script-process.mjs",
+          "server.mjs",
+          "LICENSE",
+          "public/**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "../dist"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "CodexInventory-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "CodexInventory-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

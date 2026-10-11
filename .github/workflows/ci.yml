@@ -1,0 +1,34 @@
+# Automated GitHub-hosted jobs intentionally disabled to avoid runner charges.
+# No push/pull_request triggers. Unit and browser E2E tests are kept intact
+# and run on maintainer/contributor machines using npm ci and npm test.
+# To restore Actions, opt in deliberately when an Actions budget exists.
+name: Codex Inventory CI (manual only)
+on:
+  workflow_dispatch:
+jobs:
+  node-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install test dependencies
+        run: npm ci
+      - name: Install browser on Linux
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Install browser on Windows
+        if: runner.os == 'Windows'
+        run: npx playwright install chromium
+      - name: Syntax check
+        run: npm run check
+      - name: Unit and integration tests
+        run: npm test
+      - name: Browser E2E against mock App Server
+        run: npm run test:e2e
