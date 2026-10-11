@@ -2,6 +2,10 @@
 
 **言語：日本語 | [English](README.md)**
 
+![Codex Inventoryの画面イメージ（ダミーチャット・匿名化済み）](codex-inventory-screenshot.webp)
+
+<sub>スクリーンショットはチャット履歴をダミーに置き換え、パスとチャットIDを匿名化しています。</sub>
+
 **A pixel-art, local-first desktop UI for Codex App Server.** An independent, community-developed project for Windows 11. Browse conversations, monitor usage, and review explicit command/file/network permission requests without leaving the app.
 
 ローカルで動く、ピクセルアート風のCodex App Serverクライアントです。チャット一覧、複数スレッドの並行実行、Codexの利用枠表示に対応します。

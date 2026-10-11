@@ -2,6 +2,10 @@
 
 **Language: English | [日本語](README.ja.md)**
 
+![Codex Inventory screenshot featuring demo chat history and anonymized IDs](codex-inventory-screenshot.webp)
+
+<sub>Demo screenshot: fictional chat history, masked workspace paths and session IDs.</sub>
+
 **A pixel-art, local-first desktop UI for Codex App Server.** Codex Inventory lets you browse your conversations, manage concurrent threads, monitor usage limits and reset tickets, run local tools, and explicitly review permission requests.
 
 > **Independent and unofficial.** This is a community-developed application, not developed, sponsored, certified, endorsed or supported by OpenAI. It does not bundle Codex CLI, credentials, subscriptions or usage credits. You must have your own compatible Codex environment and account.
