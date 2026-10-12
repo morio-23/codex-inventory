@@ -37,6 +37,7 @@ const activityTimeline=new ActivityTimeline();
 let activityExpanded=false;
 let activityHover=false;
 let activityRefreshTimer=null;
+const activityOrdinals=new Map();
 let splitPane=null;
 // Keep intentionally expanded commands open when streaming redraws the log.
 const expandedCommands = new Set();
@@ -691,7 +692,8 @@ function activityThreadName(id) {
   // Previews can be a private user prompt: never put them in the overlay.
   const cwd=thread?.cwd||'';
   const name=detectedProjects.find(x=>sameWorkspaceUi(x.cwd,cwd))?.name;
-  const ordinal=Math.max(1,threads.findIndex(x=>x.id===id)+1);
+  if(!activityOrdinals.has(id))activityOrdinals.set(id,activityOrdinals.size+1);
+  const ordinal=activityOrdinals.get(id);
   const prefix=name&&/^[a-zA-Z0-9_-]{1,32}$/.test(name)?name:(getLanguage()==='en'?'Chat':'チャット');
   return prefix+' #'+ordinal;
 }
