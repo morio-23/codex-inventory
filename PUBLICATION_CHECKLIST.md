@@ -29,3 +29,12 @@ Source availability is separate from EXE distribution. **No official Windows bin
 ## Independent project
 
 Codex Inventory is not made, endorsed, sponsored, certified or supported by OpenAI. The MIT license covers project-owned source; third-party dependencies retain their own license terms.
+
+
+## v0.7 concurrency and publication gate
+- [ ] Run `npm run check`, `npm test`, and `npm run test:e2e` **locally against mocks**. Report aggregate results only.
+- [ ] Run `node scripts/audit-v07-diff.mjs main` and `powershell -ExecutionPolicy Bypass -File scripts/audit-public-source.ps1`. Manually inspect diff, Git history, images, attachments and release files regardless of pass status.
+- [ ] Verify activity feed, native notifications, screenshots and test artifacts never expose real prompts, command output, personal paths, session IDs or credentials.
+- [ ] Exercise two simultaneous chats in distinct workspaces, approvals, interrupts and reconnect recovery using synthetic fixtures.
+- [ ] Ensure cross-workspace writes and cross-thread approval spoofing are rejected.
+- [ ] Do not run billable real-Codex E2E, paid GitHub Actions, merge to main, or publish an EXE without separate explicit approval.

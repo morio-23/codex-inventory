@@ -1312,3 +1312,35 @@ test('failed Codex turns show an appropriate completion warning without leaking 
   await page.locator('#completion-toast-dismiss').click();
   await expect(page.locator('#completion-toast')).toBeHidden();
 });
+
+test('split panes keep independent drafts and target the selected thread (@mock)',async({page})=>{
+  box=await sandbox();const {url}=await box.start();
+  const diagnostics=browserErrors(page);
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  const first=await createChat(page);
+  const second=await createChat(page);
+  await page.locator('.thread-item[title="'+first+'"]').click();
+  await page.locator('#prompt').fill('primary unsent draft');
+  await page.locator('#split-toggle').click();
+  await expect(page.locator('#secondary-pane')).toBeVisible();
+  await page.locator('#secondary-thread').selectOption(second);
+  await expect(page.locator('#secondary-status')).toHaveText('待機中');
+  await page.locator('#secondary-prompt').fill('secondary demo prompt');
+  await page.locator('#secondary-send').click();
+  await expect(page.locator('#secondary-log .user-message').first()).toContainText('secondary demo prompt');
+  await expect(page.locator('#prompt')).toHaveValue('primary unsent draft');
+  await page.locator('#secondary-prompt').fill('secondary unsent draft');
+  await page.locator('#split-toggle').click();
+  await expect(page.locator('#secondary-pane')).toBeHidden();
+  await page.locator('#split-toggle').click();
+  await expect(page.locator('#secondary-pane')).toBeVisible();
+  await expect(page.locator('#secondary-prompt')).toHaveValue('secondary unsent draft');
+  for(const width of [768,1280,1920]){
+    await page.setViewportSize({width,height:900});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),
+      'split UI overflow at '+width).toBeLessThanOrEqual(1);
+  }
+  expect(diagnostics.consoleErrors).toEqual([]);
+  expect(diagnostics.httpErrors).toEqual([]);
+});

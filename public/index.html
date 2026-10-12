@@ -14,7 +14,7 @@
     <header class="topbar">
       <div class="brand-mark" aria-hidden="true"><span>◆</span></div>
       <div class="brand"><span class="eyebrow">LOCAL CODEX CONTROLLER / V0.6</span><h1>CODEX <em>INVENTORY</em></h1></div>
-      <div class="topbar-actions"><label class="language-picker" for="ui-language"><span>Language / 言語</span><select id="ui-language" aria-label="Interface language / 表示言語"><option value="ja">日本語</option><option value="en">English</option></select></label><div class="server-pill" id="server-pill"><span class="lamp"></span><span id="connection">接続確認中...</span></div></div>
+      <div class="topbar-actions"><button id="split-toggle" type="button" class="split-toggle" aria-pressed="false" aria-controls="secondary-pane">◫ 2画面</button><label class="language-picker" for="ui-language"><span>Language / 言語</span><select id="ui-language" aria-label="Interface language / 表示言語"><option value="ja">日本語</option><option value="en">English</option></select></label><div class="server-pill" id="server-pill"><span class="lamp"></span><span id="connection">接続確認中...</span></div></div>
     </header>
     <div id="notice" class="notice" role="status" aria-live="polite">Codexデスクトップアプリのチャット履歴を読み込みます。</div>
     <div class="app-layout">
@@ -82,6 +82,7 @@
           <p id="item-cost" class="item-cost">実行方法と利用枠を確認してください。</p>
         </div>
       </section>
+      <div id="quest-panes" class="quest-panes">
       <section class="quest-column">
         <div class="quest-header"><div><span class="eyebrow small">YOUR QUEST</span><h2><span class="quest-rune">✣</span> クエストログ</h2></div><span id="mode-badge" class="mode-badge">観察モード</span></div>
         <div class="quest-paper">
@@ -114,6 +115,33 @@
         </div>
         <div class="footer-note"><span>▣</span> ローカルで動作 / 操作内容に応じてCodexがファイルやコマンドを扱います</div>
       </section>
+      <section class="quest-column secondary-quest" id="secondary-pane" aria-label="Second Codex chat" hidden>
+        <div class="quest-header"><div><span class="eyebrow small">SECOND QUEST</span><h2>✣ 分割チャット</h2></div><span class="quest-state" id="secondary-status">未選択</span></div>
+        <div class="quest-paper split-paper">
+          <div class="split-thread-controls"><label for="secondary-thread">別のチャット</label>
+            <select id="secondary-thread" aria-label="Secondary chat"><option value="">別のチャットを選択</option></select>
+            <button id="secondary-new" type="button" disabled>＋ 新規</button>
+          </div>
+          <div class="split-model-controls">
+            <label>モデル<select id="secondary-model"><option value="">Codex設定を継承</option></select></label>
+            <label>推論<select id="secondary-effort"><option value="">既定</option></select></label>
+          </div>
+          <label class="split-field">アクション<select id="secondary-action">
+            <option value="quest">自由依頼</option><option value="inspect">調査</option>
+            <option value="build">実装</option><option value="fix">修正</option>
+            <option value="test">テスト</option><option value="review">レビュー</option>
+            <option value="map">構成把握</option>
+          </select></label>
+          <label class="split-field">任務の内容<textarea id="secondary-prompt" placeholder="別のチャットへの依頼"></textarea></label>
+          <label class="split-edit"><input type="checkbox" id="secondary-editing"> ファイル編集を許可</label>
+          <div class="run-actions"><button type="button" id="secondary-send" class="primary-btn" disabled>▶ 実行</button>
+            <button id="secondary-stop" type="button" class="stop-btn" disabled>■ 中断</button></div>
+          <div id="secondary-approvals" class="split-approvals" hidden></div>
+          <div class="log-header"><span>▤ 実行ログ</span><button id="secondary-reload" type="button" class="small-btn">履歴を再読込</button></div>
+          <div id="secondary-log" class="quest-log" role="log" aria-live="off"></div>
+        </div>
+      </section>
+      </div>
     </div>
     <section id="utility-drawer" class="utility-drawer" aria-label="補助ワークベンチ" hidden>
       <div class="utility-bar">
@@ -161,6 +189,11 @@
     </section>
     <footer class="site-footer"><span>© CODEX INVENTORY — UNOFFICIAL LOCAL UI</span><span>ESC: 説明を閉じる <i>•</i> 1–9: アイテム選択</span></footer>
   </main>
+  <button id="activity-feed-launcher" type="button" class="activity-feed-launcher" aria-label="Show recent activity" hidden>▤ 履歴</button>
+  <section id="activity-feed" class="activity-feed" aria-label="Other chat activity" hidden>
+    <div class="activity-feed-heading"><span>▤ ACTIVITY</span><button id="activity-feed-toggle" type="button" aria-expanded="false" aria-label="Show recent activity">▴</button></div>
+    <div id="activity-feed-list" class="activity-feed-list" role="log" aria-live="off"></div>
+  </section>
   <div id="completion-toast" class="completion-toast" role="status" aria-live="polite" hidden>
     <span id="completion-toast-text"></span><button id="completion-toast-open" type="button">チャットを見る</button><button id="completion-toast-dismiss" type="button" aria-label="完了通知を閉じる">×</button>
   </div>

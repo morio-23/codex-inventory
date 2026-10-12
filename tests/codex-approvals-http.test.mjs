@@ -47,3 +47,48 @@ test('approval HTTP API is project-scoped, origin checked and one-shot',async t=
   assert.equal((await finished).status,'completed');
   assert.deepEqual((await (await fetch(url+'/api/approvals',{headers})).json()).approvals,[]);
 });
+
+test('explicit approval is bound to its own workspace and never follows active-project switch',async t=>{
+  const {mkdtemp,mkdir,rm}=await import('node:fs/promises');
+  const {tmpdir}=await import('node:os');
+  const root=await mkdtemp(join(tmpdir(),'codex-approval-workspaces-'));
+  const alpha=join(root,'alpha'),beta=join(root,'beta');
+  await mkdir(alpha);await mkdir(beta);
+  const client=new AppServerClient({command:process.execPath,args:[mock],timeoutMs:5000,
+    env:{...process.env,MOCK_APPROVAL_REQUEST:'1',MOCK_APPROVAL_KIND:'command'}});
+  t.after(async()=>{client.close();await rm(root,{recursive:true,force:true});});
+  const service=new CodexService(client,{workspace:alpha,autoDiscover:true,knownProjects:[alpha,beta]});
+  await service.start();
+  await service.discoverProjects({force:true});
+  await service.selectProject(alpha);
+  const {thread}=await service.createThread({editing:true,workspace:beta});
+  const server=http.createServer();
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const port=server.address().port;
+  server.on('request',createHandler({service,port,workspace:alpha}));
+  t.after(()=>{server.closeAllConnections?.();server.close();});
+  const url='http://127.0.0.1:'+port;
+  const headers=cwd=>({'X-Codex-Workspace':encodeURIComponent(cwd),
+    'X-Codex-Workspace-Mode':'explicit'});
+  const requested=new Promise(resolve=>service.on('event',function handler(event){
+    if(event.type==='approval-request'){service.off('event',handler);resolve(event.approval);}
+  }));
+  const finished=new Promise(resolve=>service.on('event',function handler(event){
+    if(event.type==='codex'&&event.method==='turn/completed'){
+      service.off('event',handler);resolve(event.params.turn);
+    }
+  }));
+  await service.startTurn({threadId:thread.id,prompt:'synthetic approval test',editing:true,workspace:beta});
+  const approval=await requested;
+  const pending=await fetch(url+'/api/approvals',{headers:headers(beta)});
+  assert.equal((await pending.json()).approvals[0].approvalId,approval.approvalId);
+  const reply=(cwd,decision)=>fetch(url+'/api/approvals/'+approval.approvalId+'/respond',{
+    method:'POST',headers:{...headers(cwd),Origin:url,'Content-Type':'application/json'},
+    body:JSON.stringify({decision})
+  });
+  assert.equal((await reply(alpha,'accept')).status,409,'cannot approve via another workspace');
+  assert.equal((await reply(beta,'accept')).status,200,'owning workspace can explicitly approve');
+  assert.equal((await reply(beta,'accept')).status,409,'one-shot approval cannot be replayed');
+  assert.equal((await finished).status,'completed');
+  assert.equal(service.workspace,alpha,'approval must not move the selected project');
+});
