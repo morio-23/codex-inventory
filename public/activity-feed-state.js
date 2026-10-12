@@ -51,4 +51,6 @@ export class ActivityTimeline {
     return this.entries.filter(entry=>!active.has(entry.threadId)&&(expanded||entry.persistent||now-entry.at<this.ttlMs)).slice(expanded?-100:-4);
   }
   clearTransient(){this.entries=this.entries.filter(x=>x.persistent);this.keys=new Set(this.entries.map(x=>x.key));}
+  clearApprovals(){this.entries=this.entries.filter(x=>x.kind!=='approval');this.keys=new Set(this.entries.map(x=>x.key));}
+  clearConnection(){this.entries=this.entries.filter(x=>x.kind!=='disconnected');this.keys=new Set(this.entries.map(x=>x.key));}
 }
