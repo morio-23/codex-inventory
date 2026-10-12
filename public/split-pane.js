@@ -1,9 +1,9 @@
 // Independent secondary view for concurrent Codex work. No sensitive data is persisted in Git.
 export class SplitPane {
   constructor({api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,getRunning,
-    getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,onSharedStatus}) {
+    getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus}) {
     Object.assign(this,{api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,
-      getRunning,getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,onSharedStatus});
+      getRunning,getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus});
     this.root=document.getElementById('secondary-pane');
     this.wrap=document.getElementById('quest-panes');
     this.layout=document.querySelector('.app-layout');
@@ -51,6 +51,7 @@ export class SplitPane {
     try{localStorage.setItem('codex-inventory:split-enabled',this.enabled?'on':'off');}catch{}
     this.applyLayout();
     this.onSharedStatus();
+    if(this.enabled)void this.refreshApprovals();
   }
   shortLabel(thread,index){
     // Thread.preview is commonly a real prompt; show only a synthetic ordinal in this selector.
@@ -90,6 +91,7 @@ export class SplitPane {
     this.workspace=thread?.cwd||'';
     this.prompt.value=this.drafts.get(this.threadId)||'';
     this.updateButtons();this.renderLog();this.renderApprovals();
+    if(this.enabled)void this.refreshApprovals();
     if(thread)await this.loadThread();
   }
   async loadThread(){
