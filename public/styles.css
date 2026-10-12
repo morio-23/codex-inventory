@@ -629,3 +629,8 @@ html[lang="en"] .hotbar-controls button{
 .activity-feed-entry:disabled{cursor:default}
 @media(max-width:500px){.activity-feed{left:12px;bottom:12px;width:calc(100vw - 24px)}}
 @media(prefers-reduced-motion:reduce){.activity-feed{backdrop-filter:none}}
+
+/* Persistent compact launcher for faded activity history. */
+.activity-feed-launcher[hidden]{display:none!important}
+.activity-feed-launcher{position:fixed;bottom:16px;left:16px;z-index:89;border:2px solid #54735a;background:rgba(18,25,23,.80);color:#e7f2df;padding:6px 10px;font:700 11px ui-monospace,Consolas,monospace;cursor:pointer}
+.activity-feed-launcher:focus-visible{outline:2px solid #d9ebc8;outline-offset:2px}
