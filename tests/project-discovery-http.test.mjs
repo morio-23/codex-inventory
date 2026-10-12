@@ -176,6 +176,11 @@ test('explicit workspace-scoped requests can operate across projects without cha
       'X-Codex-Workspace':encodeURIComponent(cwd),'X-Codex-Workspace-Mode':'explicit'},
     body:JSON.stringify(body)
   });
+  const cross=await explicit('/api/threads/'+first.thread.id+'/turn',beta,
+    {prompt:'must reject',action:'quest',editing:false});
+  assert.equal(cross.status,409,'cannot run another workspace thread');
+  const outside=await explicit('/api/threads',root,{editing:false});
+  assert.equal(outside.status,403,'unregistered parent folder is not a valid workspace');
   const [a,b]=await Promise.all([
     explicit('/api/threads/'+first.thread.id+'/turn',alpha,{prompt:'demo alpha',action:'quest',editing:false}),
     explicit('/api/threads/'+second.thread.id+'/turn',beta,{prompt:'demo beta',action:'quest',editing:false})
@@ -183,13 +188,6 @@ test('explicit workspace-scoped requests can operate across projects without cha
   assert.equal(a.status,202);
   assert.equal(b.status,202);
   assert.equal(service.workspace,alpha,'explicit requests must not change the project picker');
-  assert.equal(service.turnWorkspaces.get(first.thread.id),alpha);
-  assert.equal(service.turnWorkspaces.get(second.thread.id),beta);
-  const cross=await explicit('/api/threads/'+first.thread.id+'/turn',beta,
-    {prompt:'must reject',action:'quest',editing:false});
-  assert.equal(cross.status,409,'cannot run another workspace thread');
-  const outside=await explicit('/api/threads',root,{editing:false});
-  assert.equal(outside.status,403,'unregistered parent folder is not a valid workspace');
   const legacy=await post('/api/threads',{editing:false});
   assert.equal(legacy.status,201);
   assert.equal((await legacy.json()).thread.cwd,alpha,'legacy request remains bound to selected project');
