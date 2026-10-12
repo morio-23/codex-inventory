@@ -312,14 +312,16 @@ test('reload restores the selected chat even when it is not first in the list',a
   expect(listed).toHaveLength(2);
   const selected=listed[1];
   await page.locator(`.thread-item[data-thread-id="${selected}"]`).click();
-  const selectedLabel=await page.locator('#active-thread').textContent();
+  const selectedRow=page.locator(`.thread-item[data-thread-id="${selected}"]`);
+  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
   await page.reload();
-  await expect(page.locator('#active-thread')).toHaveText(selectedLabel);
-  await expect(page.locator(`.thread-item[data-thread-id="${selected}"]`)).toHaveClass(/chosen/);
+  await expect(selectedRow).toHaveClass(/chosen/);
+  await expect(page.locator('#active-thread')).toHaveText(await selectedRow.locator('.thread-name').textContent());
   await page.goto('about:blank');
   await box.restart();
   await page.goto(url);
-  await expect(page.locator('#active-thread')).toHaveText(selectedLabel);
+  await expect(selectedRow).toHaveClass(/chosen/);
+  await expect(page.locator('#active-thread')).toHaveText(await selectedRow.locator('.thread-name').textContent());
 });
 
 test('connection failure and disconnect recover in the browser',async({page})=>{
@@ -1351,6 +1353,20 @@ test('split panes keep independent drafts and target the selected thread (@mock)
   expect(diagnostics.httpErrors).toEqual([]);
 });
 
+test('missing template variables stay out of the activity notice',async({page})=>{
+  box=await sandbox();
+  const {url}=await box.start();
+  await page.goto(url);
+  await openTemplates(page);
+  await page.locator('#template-select').selectOption('feature');
+  await page.locator('#template-body').fill('Synthetic task: {private_marker}');
+  await page.locator('#template-save').click();
+  await page.locator('#template-apply').click();
+  await expect(page.locator('#notice')).toHaveText('未入力の変数があります');
+  await expect(page.locator('#notice')).not.toContainText('private_marker');
+  expect((await (await page.request.get(url+'/api/threads')).json()).threads).toHaveLength(0);
+});
+
 test('split selection and width survive reload, and separator supports pointer and keyboard (@mock)',async({page})=>{
   box=await sandbox();const {url}=await box.start();
   await page.setViewportSize({width:1280,height:900});
@@ -1721,4 +1737,148 @@ test('project and chat chrome hides workspace names and prompt previews (@mock)'
   expect(options.every(title=>/^プロジェクト\d+$/.test(title))).toBe(true);
   const chatTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
   expect(chatTitles.every(title=>/^チャット\d+$/.test(title))).toBe(true);
+});
+
+test('three chats across two workspaces keep activity, approvals and stops correctly scoped (@mock)',async({page})=>{
+  test.setTimeout(90000);
+  box=await seededProjects();
+  const {url}=await box.start({CODEX_WORKSPACE:'',MOCK_TURN_DELAY_MS:'3500',
+    MOCK_SLOW_TURN_MATCH:'B1-slow',MOCK_SLOW_TURN_DELAY_MS:'12000',
+    MOCK_APPROVAL_REQUEST:'1',MOCK_APPROVAL_MATCH:'A1-approval',
+    MOCK_ACTIVITY_COMMAND_MATCH:'A2-progress',MOCK_DUP_COMPLETION:'1'});
+  const scope=cwd=>({'X-Codex-Workspace':encodeURIComponent(cwd),'X-Codex-Workspace-Mode':'explicit'});
+  const a1='mock-alpha-auto',b1='mock-beta-auto';
+  const start=(id,cwd,prompt,editing=false)=>page.request.post(`${url}/api/threads/${id}/turn`,{
+    headers:scope(cwd),data:{prompt,action:'quest',editing,model:null,effort:null}
+  });
+  const state=async()=>(await (await fetch(`${url}/api/activity-state`)).json());
+  await page.addInitScript(()=>{
+    const NativeEventSource=window.EventSource;
+    window.EventSource=class extends NativeEventSource{
+      constructor(...args){super(...args);window.syntheticEventStream=this;}
+    };
+  });
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await page.locator('#project-select').selectOption(box.alpha);
+  const created=await page.request.post(`${url}/api/threads`,{headers:scope(box.alpha),data:{editing:false}});
+  expect(created.status()).toBe(201);
+  const a2=(await created.json()).thread.id;
+  await page.locator('#reload-threads').click();
+  await expect(page.locator(`.thread-item[data-thread-id="${a2}"]`)).toBeVisible();
+  const a2Label=await page.locator(`.thread-item[data-thread-id="${a2}"] .thread-name`).textContent();
+  await page.locator(`.thread-item[data-thread-id="${a1}"]`).click();
+  await page.locator('#split-toggle').click();
+  await page.locator('#secondary-thread').selectOption(b1);
+  await expect(page.locator('#secondary-pane')).toBeVisible();
+
+  const [a1Start,a2Start,b1Start]=await Promise.all([
+    start(a1,box.alpha,'A1-approval synthetic request'),
+    start(a2,box.alpha,'A2-progress synthetic work'),
+    start(b1,box.beta,'B1-slow synthetic work')
+  ]);
+  expect([a1Start.status(),a2Start.status(),b1Start.status()]).toEqual([202,202,202]);
+  await expect.poll(async()=>{const running=(await state()).runningThreadIds;return [a1,a2,b1].every(id=>running.includes(id));}).toBe(true);
+  await expect(page.locator('#activity-feed-list .activity-started')).toContainText(a2Label);
+  await expect(page.locator('#activity-feed-list .activity-command')).toContainText(a2Label);
+  await expect(page.locator('#activity-feed-list')).not.toContainText(box.alpha);
+  await expect(page.locator('#activity-feed-list')).not.toContainText(box.beta);
+  await expect(page.locator('#codex-approval-panel')).toBeVisible();
+
+  await page.locator('#project-select').selectOption(box.beta);
+  await expect.poll(async()=>{const running=(await state()).runningThreadIds;return [a1,a2,b1].every(id=>running.includes(id));}).toBe(true);
+  await page.locator('#project-select').selectOption(box.alpha);
+  const pendingResponse=await page.request.get(`${url}/api/approvals`,{headers:scope(box.alpha)});
+  expect(pendingResponse.status()).toBe(200);
+  const [approval]=(await pendingResponse.json()).approvals;
+  expect(approval.threadId).toBe(a1);
+  const b1Turn=(await state()).runningTurns.find(row=>row.threadId===b1).turnId;
+  const wrong=await page.request.post(`${url}/api/approvals/${approval.approvalId}/respond`,{
+    headers:{...scope(box.beta),Origin:url},
+    data:{decision:'accept',threadId:b1,turnId:b1Turn}
+  });
+  expect(wrong.status()).toBe(409);
+  expect((await (await page.request.get(`${url}/api/approvals`,{headers:scope(box.alpha)})).json()).approvals).toHaveLength(1);
+  await expect.poll(async()=>!(await state()).runningThreadIds.includes(a2)).toBe(true);
+  await expect(page.locator('#activity-feed-list .activity-completed')).toContainText(a2Label);
+  await expect.poll(async()=>[(await state()).runningThreadIds.includes(a1),
+    (await state()).runningThreadIds.includes(b1)]).toEqual([true,true]);
+  const stopped=await page.request.post(`${url}/api/threads/${b1}/interrupt`,{
+    headers:scope(box.beta),data:{turnId:b1Turn}
+  });
+  expect(stopped.status()).toBe(200);
+  await expect.poll(async()=>[(await state()).runningThreadIds.includes(a1),
+    (await state()).runningThreadIds.includes(b1)]).toEqual([true,false]);
+  await expect(page.locator('#secondary-stop')).toBeDisabled();
+  await expect(page.locator('#codex-approval-panel')).toBeVisible();
+
+  await page.locator('#split-toggle').click();
+  await page.locator('#split-toggle').click();
+  await page.locator('#secondary-thread').selectOption(b1);
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('tab',{name:/second|右|2/i}).click();
+  await page.getByRole('tab',{name:/first|左|1/i}).click();
+  expect((await state()).runningThreadIds).toContain(a1);
+  await page.evaluate(()=>{
+    window.syntheticCompletionCalls=[];
+    window.codexInventory={...(window.codexInventory||{}),
+      notifyTurnComplete:async status=>{window.syntheticCompletionCalls.push(status);}};
+  });
+  const reconnectTurn=await start(a2,box.alpha,'A2-progress reconnect completion');
+  expect(reconnectTurn.status()).toBe(202);
+  await expect(page.locator(`.thread-item[data-thread-id="${a2}"]`)).toContainText('実行中');
+  await page.evaluate(()=>window.syntheticEventStream.close());
+  await page.context().setOffline(true);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER OFFLINE');
+  const denied=await fetch(`${url}/api/approvals/${approval.approvalId}/respond`,{
+    method:'POST',headers:{...scope(box.alpha),Origin:url,'Content-Type':'application/json'},
+    body:JSON.stringify({decision:'decline',threadId:a1,turnId:approval.turnId})
+  });
+  expect(denied.status).toBe(200);
+  await expect.poll(async()=>{
+    const record=await (await fetch(`${url}/api/threads/${a2}`)).json();
+    return record.messages?.some(message=>message.role==='assistant'&&message.text.includes('reconnect completion'));
+  }).toBe(true);
+  expect(await page.evaluate(()=>window.syntheticCompletionCalls)).toEqual([]);
+  await page.context().setOffline(false);
+  await expect(page.locator('#codex-approval-panel')).toBeHidden({timeout:15000});
+  await expect.poll(()=>page.evaluate(()=>window.syntheticCompletionCalls.length),{timeout:15000}).toBe(2);
+  expect((await page.evaluate(()=>window.syntheticCompletionCalls)).sort()).toEqual(['completed','failed']);
+  await expect.poll(async()=>(await (await page.request.get(`${url}/api/approvals`,{headers:scope(box.alpha)})).json()).approvals.length).toBe(0);
+
+  expect((await start(a1,box.alpha,'A1-approval second')).status()).toBe(202);
+  await expect(page.locator('#codex-approval-panel')).toBeVisible();
+  const [older]=(await (await page.request.get(`${url}/api/approvals`,{headers:scope(box.alpha)})).json()).approvals;
+  let releaseResponse,processedResponse,completedResponse=0;
+  const processed=new Promise(resolve=>{processedResponse=resolve;});
+  const hold=new Promise(resolve=>{releaseResponse=resolve;});
+  await page.route('**/api/approvals/*/respond',async route=>{
+    const response=await route.fetch();processedResponse();await hold;
+    await route.fulfill({response});completedResponse++;
+  });
+  await page.locator('#codex-approval-list .approval-decline').click();
+  await processed;
+  await expect.poll(async()=>!(await state()).runningThreadIds.includes(a1)).toBe(true);
+  expect((await start(a1,box.alpha,'A1-approval third')).status()).toBe(202);
+  await expect(page.locator('#codex-approval-list .codex-approval-card')).toHaveCount(1);
+  releaseResponse();
+  await expect.poll(()=>completedResponse).toBe(1);
+  const [newer]=(await (await page.request.get(`${url}/api/approvals`,{headers:scope(box.alpha)})).json()).approvals;
+  expect(newer.approvalId).not.toBe(older.approvalId);
+  await expect(page.locator('#codex-approval-list .codex-approval-card')).toHaveCount(1);
+  expect((await fetch(`${url}/api/approvals/${newer.approvalId}/respond`,{
+    method:'POST',headers:{...scope(box.alpha),Origin:url,'Content-Type':'application/json'},
+    body:JSON.stringify({decision:'decline',threadId:a1,turnId:newer.turnId})
+  })).status).toBe(200);
+  await expect.poll(async()=>!(await state()).runningThreadIds.includes(a1)).toBe(true);
+  const [editOne,editTwo]=await Promise.all([
+    start(a1,box.alpha,'A1 synthetic edit',true),
+    start(a2,box.alpha,'A2 synthetic edit',true)
+  ]);
+  expect([editOne.status(),editTwo.status()]).toEqual([202,202]);
+  const conflict=page.locator('#workspace-conflicts');
+  await expect(conflict).toBeVisible();
+  await expect(conflict).toContainText(a2Label);
+  await expect(conflict).not.toContainText(box.alpha);
+  await expect(conflict).toBeHidden({timeout:15000});
 });

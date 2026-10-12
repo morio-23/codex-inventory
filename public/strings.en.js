@@ -426,6 +426,7 @@ export default {
   "Codexが実行を開始しました": "Codex started executing",
   "利用量取得失敗: ": "Usage fetch failed: ",
   "利用量を取得できません": "Usage unavailable",
+  "未入力の変数があります": "Some template variables are missing",
   "チャット一覧を取得できません": "Could not load chats",
   "実行を開始できません。対象チャットを確認してください": "Could not start the turn. Check the target chat.",
   "テンプレートを読み込めません": "Could not import the template",
