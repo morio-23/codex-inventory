@@ -22,9 +22,9 @@ Record OS, Node version, commit SHA and test PASS/FAIL/SKIP counts in your PR. T
 
 Do not commit private projects, personal conversations, access tokens, developer paths, user-profile configuration, or raw screenshots of private content. The repository contains a local check at `scripts/audit-public-source.ps1` and ignores release evidence, credential files and compiled binaries. This check is heuristic; manually inspect changes and screenshots before every public commit.
 
-## Windows binaries are not released yet
+## v0.7 Windows binaries are not released yet
 
-Source availability is separate from EXE distribution. **No official Windows binary is available in GitHub Releases yet.** The Windows release needs isolated profile testing, real permission approval/decline checks, Setup installation/uninstallation, notification-center inspection, signing status, third-party license notices and checksum verification. See [RELEASE_ACCEPTANCE.md](RELEASE_ACCEPTANCE.md) ([日本語](RELEASE_ACCEPTANCE.ja.md)). Never publish an earlier test EXE merely to supply a downloadable asset.
+Source availability is separate from EXE distribution. Older v0.6 beta release assets exist, but **no v0.7 Windows binary has been released.** The Windows release needs isolated profile testing, real permission approval/decline checks, Setup installation/uninstallation, notification-center inspection, signing status, third-party license notices and checksum verification. See [RELEASE_ACCEPTANCE.md](RELEASE_ACCEPTANCE.md) ([日本語](RELEASE_ACCEPTANCE.ja.md)). Do not treat an older EXE as a validated v0.7 artifact.
 
 ## Independent project
 
@@ -38,3 +38,13 @@ Codex Inventory is not made, endorsed, sponsored, certified or supported by Open
 - [ ] Exercise two simultaneous chats in distinct workspaces, approvals, interrupts and reconnect recovery using synthetic fixtures.
 - [ ] Ensure cross-workspace writes and cross-thread approval spoofing are rejected.
 - [ ] Do not run billable real-Codex E2E, paid GitHub Actions, merge to main, or publish an EXE without separate explicit approval.
+
+### v0.7 final integration gate
+
+- [ ] Verify PR #10–#13 ancestry, the fresh `origin/main` reference and common ancestor, cumulative diff, and PR dependency chain. Name the actual audit baseline if local `main` has unrelated history.
+- [ ] Use two synthetic workspaces and three chats to mock concurrent turns, cross-chat approval rejection, scoped interruption, project switching, SSE recovery, stale or duplicate events, conflict warnings, split view and mobile tabs.
+- [ ] Record pass, fail, skip and unrun separately for every requested command, including `CODEX_E2E_REAL=0 npm run test:e2e -- --trace off` and `git diff --check`. Do not count Windows symlink skips or unrun real-Codex tests as passes.
+- [ ] Inspect cumulative changes, tracked fixtures, current and historical images, PR and Issue text and attachments, traces, screenshots, and package inclusion paths. Text scanning alone cannot clear images.
+- [ ] Check that shared-screen execution logs and detailed approvals can show prompt text, commands and paths, while activity, conflict and native notifications do not. Never permit approval while its details are hidden.
+- [ ] Verify real App Server compatibility only in a separately approved, least-privilege manual test. Mark it unverified until then.
+- [ ] Classify the final judgement as verified, managed known risks, and pre-release blockers; keep the PR in Draft for the user's decision.

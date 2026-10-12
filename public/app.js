@@ -881,19 +881,27 @@ async function refreshRuntimeActivity(){
 }
 function applyRuntimeActivity(result){
   if(!Array.isArray(result.runningThreadIds))return;
+  const previous=new Map(runningTurnIds);
   runningThreads.clear();runningTurnIds.clear();
   for(const id of result.runningThreadIds)if(typeof id==='string')runningThreads.add(id);
   for(const row of result.runningTurns||[])
     if(runningThreads.has(row.threadId)&&typeof row.turnId==='string')runningTurnIds.set(row.threadId,row.turnId);
   workspaceConflicts=Array.isArray(result.workspaceConflicts)?result.workspaceConflicts:[];
   renderWorkspaceConflicts();
+  for(const row of result.recentCompletions||[]){
+    if(!row||previous.get(row.threadId)!==row.turnId||runningThreads.has(row.threadId))continue;
+    if(!['completed','failed','interrupted'].includes(row.status))continue;
+    const turn={id:row.turnId,status:row.status};
+    recordActivity({type:'codex',method:'turn/completed',threadId:row.threadId,params:{turn}});
+    notifyTurnCompleted(row.threadId,turn);
+  }
   drawThreads();updateButtons();splitPane?.updateButtons();
 }
 
 function connectEvents(){
   if(eventStream)eventStream.close();
   eventStream=new EventSource('/api/events');
-  eventStream.onmessage=ev=>{try{onCodex(JSON.parse(ev.data));}catch(e){console.warn('event',e);}};
+  eventStream.onmessage=ev=>{try{onCodex(JSON.parse(ev.data));}catch(e){console.warn('update event could not be processed');}};
   eventStream.onerror=()=>notify('更新イベントを再接続しています…',true);
   eventStream.onopen=()=>{
     activityTimeline.clearConnection();renderActivityFeed();
@@ -1220,7 +1228,7 @@ function applyTemplate(){
   if(!append&&editor.value.trim()&&editor.dataset.suggested!=='yes'&&!confirm(t('入力中の文章をテンプレートに置き換えますか？')))return;
   editor.value=append&&editor.value.trim()?editor.value.trimEnd()+'\n\n'+output:output;
   editor.dataset.suggested='no';saveDraft();editor.focus();updateSendPreview();
-  notify(missing.length?'未入力の変数があります: '+missing.join(', '):'テンプレートを入力欄に挿入しました。送信はまだ行っていません。',!!missing.length);
+  notify(missing.length?'未入力の変数があります':'テンプレートを入力欄に挿入しました。送信はまだ行っていません。',!!missing.length);
 }
 function newTemplate(from){
   if(inventoryState.userTemplates.length>=100){notify('ユーザーテンプレートは100件までです',true);return;}

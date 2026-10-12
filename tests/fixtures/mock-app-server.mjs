@@ -118,7 +118,10 @@ async function handle(packet){
     t.turns.push(turn);t.preview=t.preview||message.split('【ユーザー依頼】\n').at(-1).slice(0,90);t.updatedAt=Math.floor(Date.now()/1000);
     active.set(t.id,{turn});persist();success(id,{turn:{id:turn.id,status:'inProgress',items:[]}});
     event('turn/started',{threadId:t.id,turn:{id:turn.id,status:'inProgress'}});
-    if(process.env.MOCK_APPROVAL_REQUEST==='1'){
+    if(process.env.MOCK_ACTIVITY_COMMAND_MATCH&&message.includes(process.env.MOCK_ACTIVITY_COMMAND_MATCH))
+      event('item/started',{threadId:t.id,turnId:turn.id,item:{id:'progress-'+nextId,type:'commandExecution'}});
+    if(process.env.MOCK_APPROVAL_REQUEST==='1'&&
+      (!process.env.MOCK_APPROVAL_MATCH||message.includes(process.env.MOCK_APPROVAL_MATCH))){
       const approvalKind=process.env.MOCK_APPROVAL_KIND||'command';
       const method=approvalKind==='file'?'item/fileChange/requestApproval':
         approvalKind==='permissions'?'item/permissions/requestApproval':'item/commandExecution/requestApproval';
@@ -144,11 +147,13 @@ async function handle(packet){
         return;
       }
     }
-    await wait(turnDelay/2);
+    const delay=process.env.MOCK_SLOW_TURN_MATCH&&message.includes(process.env.MOCK_SLOW_TURN_MATCH)
+      ?Number(process.env.MOCK_SLOW_TURN_DELAY_MS||turnDelay):turnDelay;
+    await wait(delay/2);
     if(!active.has(t.id))return;
     const itemId='msg-'+nextId;const reply='【デモ】 '+message.split('【ユーザー依頼】\n').at(-1)+'\n\n- App Server 経由のチャット履歴\n- 複数スレッドの並行実行に対応';
     event('item/agentMessage/delta',{threadId:t.id,turnId:turn.id,itemId,delta:reply.slice(0,25)});
-    await wait(turnDelay/2);
+    await wait(delay/2);
     if(!active.has(t.id))return;
     event('item/agentMessage/delta',{threadId:t.id,turnId:turn.id,itemId,delta:reply.slice(25)});
     turn.items.push({id:itemId,type:'agentMessage',text:reply});

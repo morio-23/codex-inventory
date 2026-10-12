@@ -109,6 +109,8 @@ test('parallel editing in one workspace reports a path-free conflict and clears 
   await service.interrupt(a,{workspace:alpha,turnId:turnA.turnId});
   for(let i=0;i<40&&service.running.has(a);i++)await new Promise(resolve=>setTimeout(resolve,10));
   assert.deepEqual(service.activityState().workspaceConflicts,[]);
+  assert.deepEqual(service.activityState().recentCompletions.filter(row=>row.threadId===a),
+    [{threadId:a,turnId:turnA.turnId,status:'interrupted'}]);
   await Promise.all([
     service.interrupt(b,{workspace:alpha,turnId:turnB.turnId}),
     service.interrupt(c,{workspace:beta,turnId:turnC.turnId})

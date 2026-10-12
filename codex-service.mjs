@@ -72,10 +72,10 @@ export class CodexService extends EventEmitter {
     this.connectionEpoch=0;this.needsRecovery=true;this.recoveryPromise=null;
     this.knownProjects=new Set(Array.isArray(knownProjects)?knownProjects.filter(x=>typeof x==='string'&&x.length<=4096):[]);
     this.approvals=new Map();this.approvalSequence=0;this.turnWorkspaces=new Map();
-    this.running=new Map();this.editingThreads=new Set();this.finishedTurns=new Set();this.earlyCompletions=new Map();this.earlyApprovals=new Map();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();
+    this.running=new Map();this.editingThreads=new Set();this.finishedTurns=new Set();this.recentCompletions=[];this.earlyCompletions=new Map();this.earlyApprovals=new Map();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();
     client.on('notification',e=>this.#notification(e));
     client.on('server-request',e=>this.#onApproval(e));
-    client.on('disconnect',error=>{this.connectionEpoch++;this.needsRecovery=true;this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.editingThreads.clear();this.finishedTurns.clear();this.earlyCompletions.clear();this.earlyApprovals.clear();this.subscribed.clear();this.emit('event',{type:'connection',error:error.message});});
+    client.on('disconnect',error=>{this.connectionEpoch++;this.needsRecovery=true;this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.editingThreads.clear();this.finishedTurns.clear();this.recentCompletions=[];this.earlyCompletions.clear();this.earlyApprovals.clear();this.subscribed.clear();this.emit('event',{type:'connection',error:error.message});});
     client.on('warning',message=>this.emit('event',{type:'warning',text:message}));
   }
   async start(){
@@ -121,7 +121,7 @@ export class CodexService extends EventEmitter {
     }
     return {runningThreadIds:[...this.running.keys()],runningTurns:[...this.running]
       .filter(([,turnId])=>turnId!=='starting'&&turnId!=='started')
-      .map(([threadId,turnId])=>({threadId,turnId})),workspaceConflicts:groups
+      .map(([threadId,turnId])=>({threadId,turnId})),recentCompletions:[...this.recentCompletions],workspaceConflicts:groups
       .filter(item=>item.editing>1)
       .map(item=>({threadIds:item.threadIds,reason:'parallel-edits'}))};
   }
@@ -479,6 +479,9 @@ export class CodexService extends EventEmitter {
       this.running.delete(threadId);this.turnWorkspaces.delete(threadId);this.editingThreads.delete(threadId);
       this.finishedTurns.add(completedId);
       while(this.finishedTurns.size>100)this.finishedTurns.delete(this.finishedTurns.values().next().value);
+      this.recentCompletions.push({threadId,turnId:completedId,
+        status:['completed','failed','interrupted'].includes(params.turn.status)?params.turn.status:'completed'});
+      if(this.recentCompletions.length>50)this.recentCompletions.shift();
       this.#emitActivityState();}
     const forwarded = ['thread/started','thread/name/updated','thread/status/changed','thread/tokenUsage/updated','turn/started','turn/completed','item/started','item/completed','item/agentMessage/delta','item/commandExecution/outputDelta','turn/plan/updated','turn/diff/updated','account/rateLimits/updated'];
     if(forwarded.includes(method))this.emit('event',{type:'codex',method,threadId,params});
