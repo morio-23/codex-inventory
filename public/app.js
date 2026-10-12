@@ -720,8 +720,24 @@ function renderActivityFeed(){
     row.append(name,message);
     if(event.threadId){
       row.addEventListener('click',async()=>{
-        if(threads.some(t=>t.id===event.threadId))await selectThread(event.threadId);
-        else notify(getLanguage()==='en'?'Switch to the source project to view this chat.':'対象プロジェクトのチャット一覧から開いてください。');
+        const id=event.threadId;
+        if(threads.some(thread=>thread.id===id)){await selectThread(id);return;}
+        try{
+          if(splitPane?.enabled){
+            await splitPane.refreshThreads();
+            if(splitPane.threads.some(thread=>thread.id===id)){
+              await splitPane.selectThread(id);renderActivityFeed();return;
+            }
+          }
+          const {threads:all=[]}=await api('/api/threads?all=1');
+          const target=all.find(thread=>thread.id===id);
+          if(!target){notify('対象チャットが見つかりません',true);return;}
+          if(!sameWorkspaceUi(target.cwd,workspacePath))await switchProject(target.cwd);
+          if(sameWorkspaceUi(target.cwd,workspacePath)){
+            await refreshThreads();
+            if(threads.some(thread=>thread.id===id))await selectThread(id);
+          }
+        }catch(error){notify('対象チャットを開けません: '+error.message,true);}
       });
     }else row.disabled=true;
     root.append(row);
