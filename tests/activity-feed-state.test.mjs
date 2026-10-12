@@ -19,11 +19,11 @@ test('deduplicates replay, fades transient, keeps and resolves approval',()=>{
  assert.equal(timeline.visible({now:9002}).length,0);
 });
 test('only safe event metadata is retained',()=>{
- const event={type:'codex',method:'item/completed',threadId:'demo-A',params:{item:{id:'demo-5',type:'fileChange',changes:[{path:'C:/Users/SECRET/.env'}]},prompt:'private'}};
+ const event={type:'codex',method:'item/completed',threadId:'demo-A',params:{item:{id:'demo-5',type:'fileChange',changes:[{path:'/synthetic/only-for-tests/secret.txt'}]},prompt:'private'}};
  const value=activityFromCodex(event);
- assert.deepEqual(value,{threadId:'demo-A',kind:'files',key:'files:demo-5'});
+ assert.deepEqual(value,{threadId:'demo-A',kind:'files',key:'files:demo-A:demo-5'});
  const t=new ActivityTimeline();t.record(value,1);
- assert.equal(JSON.stringify(t.entries).includes('SECRET'),false);
+ assert.equal(JSON.stringify(t.entries).includes('/synthetic/'),false);
 });
 test('token stream never creates activity, command bursts merge',()=>{
  assert.equal(activityFromCodex({type:'codex',method:'item/agentMessage/delta',threadId:'demo-A',params:{delta:'secret'}}),null);
