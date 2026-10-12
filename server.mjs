@@ -88,6 +88,10 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         const ping=setInterval(()=>{if(!res.destroyed)res.write(': ping\n\n');},20000);ping.unref?.();
         req.on('close',()=>{clearInterval(ping);listeners.delete(res);});return;
       }
+      // Runtime reconciliation after reconnect; never send prompts, output, paths, or credentials.
+      if(req.method==='GET'&&path==='/api/activity-state'){
+        return json(res,200,{runningThreadIds:[...service.running.keys()]});
+      }
       if(req.method==='GET'&&path==='/api/status'){
         try{
           await service.start();
