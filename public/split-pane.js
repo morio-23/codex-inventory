@@ -195,7 +195,12 @@ export class SplitPane {
         editing:this.editing.checked,model:this.model.value||null,effort:this.effort.value||null
       }),{workspace:cwd,explicit:true});
       await this.refreshThreads();
-      if(response.thread&&!this.threads.some(x=>x.id===response.thread.id))this.threads.unshift(response.thread);
+      if(response.thread&&!this.threads.some(x=>x.id===response.thread.id)){
+        this.threads.unshift(response.thread);
+        const option=document.createElement('option');option.value=response.thread.id;
+        option.textContent=this.shortLabel(response.thread,0);
+        this.threadSelect.append(option);
+      }
       await this.selectThread(response.thread.id);
       this.threadSelect.value=this.threadId;
     }catch(error){this.notify('新しいチャットの作成に失敗: '+error.message,true);}
