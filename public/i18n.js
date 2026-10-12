@@ -38,7 +38,7 @@ export function t(source){return current==='en'?translateJapanese(source):source
 
 // Scope translations to application chrome. Never rewrite a transcript,
 // command, user-authored template, input value, project name or search result.
-const ignored='script,style,noscript,pre,code,[contenteditable],[data-i18n-ignore],#log .log-content,#log .command-preview,#log .command-full,.thread-name,#template-variables,#local-result-text';
+const ignored='script,style,noscript,pre,code,[contenteditable],[data-i18n-ignore],#log .log-content,#log .command-preview,#log .command-full,#secondary-log .log-content,#secondary-prompt,#secondary-approvals pre,.thread-name,#template-variables,#local-result-text';
 const nodeSources=new WeakMap();
 const attrSources=new WeakMap();
 const attrs=['title','aria-label','placeholder'];
