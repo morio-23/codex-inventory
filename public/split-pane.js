@@ -96,12 +96,22 @@ export class SplitPane {
   }
   async loadThread(){
     const id=this.threadId;if(!id)return;
+    const before=new Map((this.getMessages(id)||[]).map(message=>
+      [message,{text:message.text,pending:message.pending}]));
     try{
       const data=await this.api('/api/threads/'+encodeURIComponent(id));
       if(id!==this.threadId)return;
       const history=(data.messages||[]).map(x=>({role:x.role,text:x.text,itemId:x.itemId||null}));
-      const pending=(this.getMessages(id)||[]).filter(x=>x.pending);
-      this.setMessages(id,[...history,...pending]);
+      const current=(this.getMessages(id)||[]).filter(message=>{
+        const previous=before.get(message);
+        return message.pending||(message.itemId&&(!previous||previous.text!==message.text||previous.pending!==message.pending));
+      });
+      const byItem=new Map(history.map((message,index)=>[message.itemId,index]).filter(([itemId])=>itemId));
+      for(const message of current){
+        if(message.itemId&&byItem.has(message.itemId))history[byItem.get(message.itemId)]=message;
+        else history.push(message);
+      }
+      this.setMessages(id,history);
       this.renderLog();
     }catch(error){this.notify('分割チャットの履歴取得に失敗: '+error.message,true);}
   }

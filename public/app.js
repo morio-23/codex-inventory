@@ -43,6 +43,7 @@ let splitPane=null;
 const expandedCommands = new Set();
 const completedTurnKeys=new Set();
 const pendingCodexApprovals=new Map();
+let approvalRevision=0;
 const completionPreferenceKey='codex-inventory:completion-notifications';
 let completionThreadId=null;
 const draftPrompts = new Map();
@@ -433,6 +434,8 @@ async function selectThread(id){
   drawThreads();drawLog();updateButtons();splitPane?.updateButtons();renderActivityFeed();
   if(!id)return;
   refreshUsage();
+  const before=new Map((logs.get(id)||[]).map(message=>
+    [message,{text:message.text,pending:message.pending}]));
   try{
     const record=await api('/api/threads/'+encodeURIComponent(id));
     if(activeThreadId!==id)return;
@@ -440,9 +443,16 @@ async function selectThread(id){
     updateButtons();
     // Stored Codex turns are the source of truth on restart. Preserve any in-flight response.
     const history=(record.messages||[]).map(x=>({role:x.role,text:x.text,itemId:x.itemId||null}));
-    const current=logs.get(id)||[];
-    const dynamic=current.filter(x=>x.pending);
-    logs.set(id,[...history,...dynamic]);
+    const current=(logs.get(id)||[]).filter(message=>{
+      const previous=before.get(message);
+      return message.pending||(message.itemId&&(!previous||previous.text!==message.text||previous.pending!==message.pending));
+    });
+    const byItem=new Map(history.map((message,index)=>[message.itemId,index]).filter(([itemId])=>itemId));
+    for(const message of current){
+      if(message.itemId&&byItem.has(message.itemId))history[byItem.get(message.itemId)]=message;
+      else history.push(message);
+    }
+    logs.set(id,history);
     drawLog();
   }catch(e){notify('履歴取得エラー: '+e.message,true);}
 }
@@ -674,6 +684,7 @@ function renderCodexApprovals(){
 async function refreshCodexApprovals(){
   const current=workspacePath;
   const secondary=splitPane?.enabled?splitPane.workspace:null;
+  const revision=approvalRevision;
   if(!current&&!secondary)return;
   try{
     const tasks=[];
@@ -682,6 +693,7 @@ async function refreshCodexApprovals(){
       tasks.push(api('/api/approvals',{}, {workspace:secondary,explicit:true}));
     const results=await Promise.all(tasks);
     if(current!==workspacePath || secondary!==(splitPane?.enabled?splitPane.workspace:null))return;
+    if(revision!==approvalRevision){queueMicrotask(()=>void refreshCodexApprovals());return;}
     pendingCodexApprovals.clear();
     for(const result of results)for(const approval of result.approvals||[])
       pendingCodexApprovals.set(approval.approvalId,approval);
@@ -761,6 +773,7 @@ function recordActivity(event){
 function onCodex(e){
   recordActivity(e);
   if(e.type==='approval-request'){
+    approvalRevision++;
     pendingCodexApprovals.set(e.approval.approvalId,e.approval);
     renderCodexApprovals();
     if(!sameWorkspaceUi(e.approval.workspace,workspacePath))return;
@@ -772,9 +785,10 @@ function onCodex(e){
     return;
   }
   if(e.type==='approval-resolved'){
+    approvalRevision++;
     pendingCodexApprovals.delete(e.approvalId);renderCodexApprovals();return;
   }
-  if(e.type==='approval-reset'){pendingCodexApprovals.clear();renderCodexApprovals();return;}
+  if(e.type==='approval-reset'){approvalRevision++;pendingCodexApprovals.clear();renderCodexApprovals();return;}
   if(e.type==='turn-start'){
     runningThreads.add(e.threadId);drawThreads();updateButtons();splitPane?.updateButtons();return;
   }
@@ -824,6 +838,7 @@ function connectEvents(){
     activityTimeline.clearConnection();renderActivityFeed();
     void refreshRuntimeActivity();refreshCodexApprovals();
     if(activeThreadId){const id=activeThreadId;activeThreadId=null;selectThread(id);}
+    if(splitPane?.enabled){void splitPane.loadThread();void splitPane.refreshThreads();}
     refreshThreads();
   };
 }
