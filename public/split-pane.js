@@ -1,11 +1,18 @@
 // Independent secondary view for concurrent Codex work. No sensitive data is persisted in Git.
 export class SplitPane {
   constructor({api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,getRunning,getTurnId,setTurnId,
-    getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus}) {
+    getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus,
+    labelThread,onVisibilityChange}) {
     Object.assign(this,{api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,
-      getRunning,getTurnId,setTurnId,getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus});
+      getRunning,getTurnId,setTurnId,getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus,
+      labelThread,onVisibilityChange});
     this.root=document.getElementById('secondary-pane');
     this.wrap=document.getElementById('quest-panes');
+    this.primary=document.getElementById('primary-pane');
+    this.separator=document.getElementById('split-separator');
+    this.tabs=document.getElementById('split-mobile-tabs');
+    this.primaryTab=document.getElementById('split-primary-tab');
+    this.secondaryTab=document.getElementById('split-secondary-tab');
     this.layout=document.querySelector('.app-layout');
     this.toggle=document.getElementById('split-toggle');
     this.threadSelect=document.getElementById('secondary-thread');
@@ -18,13 +25,48 @@ export class SplitPane {
     this.threadId=null;
     this.workspace='';
     this.threads=[];
-    this.drafts=new Map();
+    this.chatState=new Map();
+    this.renderedThreadId=null;
+    this.mobilePane='primary';
+    this.width=50;
+    this.restoredThreadId=null;
     this.enabled=false;
     this.loading=false;
     this.toggle.addEventListener('click',()=>this.setSplit(!this.enabled));
     this.threadSelect.addEventListener('change',()=>void this.selectThread(this.threadSelect.value));
-    this.model.addEventListener('change',()=>this.fillModels(true));
-    this.prompt.addEventListener('input',()=>{if(this.threadId)this.drafts.set(this.threadId,this.prompt.value);});
+    this.model.addEventListener('change',()=>{this.fillModels(true);this.saveChatState();});
+    for(const control of [this.prompt,this.effort,this.editing,this.action])
+      control.addEventListener(control===this.prompt?'input':'change',()=>this.saveChatState());
+    this.output.addEventListener('scroll',()=>{
+      if(this.threadId)this.stateFor(this.threadId).scrollTop=this.output.scrollTop;
+    });
+    this.primaryTab.addEventListener('click',()=>this.showMobilePane('primary'));
+    this.secondaryTab.addEventListener('click',()=>this.showMobilePane('secondary'));
+    this.tabs.addEventListener('keydown',event=>{
+      const focused=event.target===this.primaryTab?'primary':'secondary';
+      const destination=event.key==='Home'?'primary':event.key==='End'?'secondary':
+        ['ArrowLeft','ArrowRight'].includes(event.key)?(focused==='primary'?'secondary':'primary'):null;
+      if(!destination)return;
+      event.preventDefault();this.showMobilePane(destination);
+      (destination==='primary'?this.primaryTab:this.secondaryTab).focus();
+    });
+    this.separator.addEventListener('pointerdown',event=>{
+      if(!this.enabled||this.mobile.matches)return;
+      event.preventDefault();this.separator.setPointerCapture(event.pointerId);
+      this.setWidthFromPointer(event.clientX);
+    });
+    this.separator.addEventListener('pointermove',event=>{
+      if(this.separator.hasPointerCapture(event.pointerId))this.setWidthFromPointer(event.clientX);
+    });
+    this.separator.addEventListener('keydown',event=>{
+      const step=event.shiftKey?10:2;
+      const next=event.key==='ArrowLeft'?this.width-step:event.key==='ArrowRight'?this.width+step:
+        event.key==='Home'?28:event.key==='End'?72:null;
+      if(next===null)return;
+      event.preventDefault();this.setWidth(next);
+    });
+    this.mobile=window.matchMedia('(max-width: 767px)');
+    this.mobile.addEventListener('change',()=>{this.updateResponsiveView();this.onVisibilityChange?.();});
     document.getElementById('secondary-send').addEventListener('click',()=>void this.send());
     document.getElementById('secondary-stop').addEventListener('click',()=>void this.stop());
     document.getElementById('secondary-reload').addEventListener('click',()=>void this.loadThread());
@@ -34,9 +76,67 @@ export class SplitPane {
         event.preventDefault();event.stopPropagation();void this.send();
       }
     });
-    try{this.enabled=localStorage.getItem('codex-inventory:split-enabled')==='on';}catch{}
+    try{
+      this.enabled=localStorage.getItem('codex-inventory:split-enabled')==='on';
+      this.restoredThreadId=localStorage.getItem('codex-inventory:split-thread')||null;
+      const savedWidth=Number(localStorage.getItem('codex-inventory:split-width'));
+      if(Number.isFinite(savedWidth)&&savedWidth>=28&&savedWidth<=72)this.width=savedWidth;
+    }catch{}
+    this.setWidth(this.width,false);
     this.applyLayout();
     this.fillModels(false);
+  }
+  stateFor(id){
+    if(!this.chatState.has(id))this.chatState.set(id,{draft:'',model:'',effort:'',editing:false,action:'quest',scrollTop:0});
+    return this.chatState.get(id);
+  }
+  saveChatState(){
+    if(!this.threadId)return;
+    Object.assign(this.stateFor(this.threadId),{
+      draft:this.prompt.value,model:this.model.value,effort:this.effort.value,
+      editing:this.editing.checked,action:this.action.value,scrollTop:this.output.scrollTop
+    });
+  }
+  restoreChatState(id){
+    const state=id?this.stateFor(id):{draft:'',model:'',effort:'',editing:false,action:'quest'};
+    this.prompt.value=state.draft;
+    this.model.value=state.model;
+    this.fillModels(true);
+    this.effort.value=state.effort;
+    this.editing.checked=state.editing;
+    this.action.value=state.action;
+  }
+  setWidth(value,persist=true){
+    this.width=Math.max(28,Math.min(72,Math.round(value)));
+    this.wrap.style.setProperty('--split-primary-width',this.width+'%');
+    this.separator.setAttribute('aria-valuenow',String(this.width));
+    if(persist)try{localStorage.setItem('codex-inventory:split-width',String(this.width));}catch{}
+  }
+  setWidthFromPointer(x){
+    const bounds=this.wrap.getBoundingClientRect();
+    if(bounds.width)this.setWidth((x-bounds.left)/bounds.width*100);
+  }
+  showMobilePane(pane){
+    this.mobilePane=pane;
+    this.updateResponsiveView();
+    this.onVisibilityChange?.();
+  }
+  visibleThreadIds(){
+    const primary=this.getPrimaryThreadId();
+    if(!this.enabled)return primary?[primary]:[];
+    const ids=this.mobile.matches?
+      [this.mobilePane==='primary'?primary:this.threadId]:[primary,this.threadId];
+    return [...new Set(ids.filter(Boolean))];
+  }
+  updateResponsiveView(){
+    const active=this.enabled&&this.mobile.matches?this.mobilePane:'both';
+    this.wrap.dataset.activePane=active;
+    this.primaryTab.setAttribute('aria-selected',String(active==='primary'));
+    this.secondaryTab.setAttribute('aria-selected',String(active==='secondary'));
+    this.primaryTab.tabIndex=active==='primary'?0:-1;
+    this.secondaryTab.tabIndex=active==='secondary'?0:-1;
+    this.tabs.hidden=!this.enabled;
+    this.separator.hidden=!this.enabled;
   }
   applyLayout(){
     this.root.hidden=!this.enabled;
@@ -44,6 +144,7 @@ export class SplitPane {
     this.layout.classList.toggle('split-view',this.enabled);
     this.toggle.setAttribute('aria-pressed',String(this.enabled));
     this.toggle.textContent=this.enabled?'▣ 1画面':'◫ 2画面';
+    this.updateResponsiveView();
     if(this.enabled)void this.refreshThreads();
   }
   setSplit(on){
@@ -51,17 +152,11 @@ export class SplitPane {
     try{localStorage.setItem('codex-inventory:split-enabled',this.enabled?'on':'off');}catch{}
     this.applyLayout();
     this.onSharedStatus();
+    this.onVisibilityChange?.();
     if(this.enabled)void this.refreshApprovals();
   }
   shortLabel(thread,index){
-    // Thread.preview is commonly a real prompt; show only a synthetic ordinal in this selector.
-    const project=this.workspaceLabel(thread.cwd);
-    return project+' / '+(this.getLanguage()==='en'?'Chat ':'チャット ')+(index+1);
-  }
-  workspaceLabel(cwd){
-    const value=String(cwd||'').replace(/[/\\]+$/,'').split(/[/\\]/).pop()||'Workspace';
-    // Never expose full local paths in selector or native notifications.
-    return /^[a-zA-Z0-9_-]{1,24}$/.test(value)?value:(this.getLanguage()==='en'?'Project':'プロジェクト');
+    return this.labelThread?.(thread)||(this.getLanguage()==='en'?'Chat ':'チャット ')+(index+1);
   }
   async refreshThreads(){
     if(!this.enabled||this.loading)return;
@@ -69,28 +164,40 @@ export class SplitPane {
     try{
       const data=await this.api('/api/threads?all=1');
       this.threads=Array.isArray(data.threads)?data.threads.filter(x=>x&&typeof x.id==='string'&&typeof x.cwd==='string'):[];
-      const prior=this.threadId;
+      const prior=this.threadId||this.restoredThreadId;
       this.threadSelect.replaceChildren();
       const empty=document.createElement('option');empty.value='';empty.textContent=this.getLanguage()==='en'?'Select another chat':'別のチャットを選択';this.threadSelect.append(empty);
       this.threads.forEach((thread,i)=>{
         const opt=document.createElement('option');opt.value=thread.id;opt.textContent=this.shortLabel(thread,i);
         this.threadSelect.append(opt);
       });
-      this.threadSelect.value=this.threads.some(x=>x.id===prior)?prior:'';
-      if(!this.threadSelect.value){
+      const found=this.threads.find(x=>x.id===prior);
+      this.threadSelect.value=found?.id||'';
+      if(found&&this.threadId!==found.id)await this.selectThread(found.id);
+      else if(found)this.workspace=found.cwd;
+      else{
         this.threadId=null;this.workspace='';this.prompt.value='';this.output.replaceChildren();
+        try{localStorage.removeItem('codex-inventory:split-thread');}catch{}
         this.updateButtons();
       }
-    }catch(error){this.notify('分割画面のチャット一覧取得に失敗: '+error.message,true);}
+      this.restoredThreadId=null;
+    }catch{this.notify('分割画面のチャット一覧を取得できませんでした',true);}
     finally{this.loading=false;}
   }
   async selectThread(id){
-    if(this.threadId)this.drafts.set(this.threadId,this.prompt.value);
+    this.saveChatState();
     const thread=this.threads.find(x=>x.id===id);
     this.threadId=thread?.id||null;
     this.workspace=thread?.cwd||'';
-    this.prompt.value=this.drafts.get(this.threadId)||'';
+    this.threadSelect.value=this.threadId||'';
+    this.restoreChatState(this.threadId);
+    try{
+      if(this.threadId)localStorage.setItem('codex-inventory:split-thread',this.threadId);
+      else localStorage.removeItem('codex-inventory:split-thread');
+    }catch{}
     this.updateButtons();this.renderLog();this.renderApprovals();
+    if(this.mobile.matches&&this.threadId)this.showMobilePane('secondary');
+    else this.onVisibilityChange?.();
     if(this.enabled)void this.refreshApprovals();
     if(thread)await this.loadThread();
   }
@@ -113,7 +220,7 @@ export class SplitPane {
       }
       this.setMessages(id,history);
       this.renderLog();
-    }catch(error){this.notify('分割チャットの履歴取得に失敗: '+error.message,true);}
+    }catch{this.notify('分割チャットの履歴を取得できませんでした',true);}
   }
   fillModels(preserve=true){
     const catalog=this.getCatalog();
@@ -149,9 +256,11 @@ export class SplitPane {
   }
   renderLog(){
     const root=this.output;
-    const scrollBottom=root.scrollHeight-root.scrollTop-root.clientHeight<35;
-    const oldTop=root.scrollTop;
+    const sameThread=this.renderedThreadId===this.threadId;
+    const scrollBottom=sameThread&&root.scrollHeight-root.scrollTop-root.clientHeight<35;
+    const oldTop=sameThread?root.scrollTop:(this.threadId?this.stateFor(this.threadId).scrollTop:0);
     root.replaceChildren();
+    this.renderedThreadId=this.threadId;
     if(!this.threadId)return;
     const fragment=document.createDocumentFragment();
     for(const message of this.getMessages(this.threadId)||[]){
@@ -182,14 +291,14 @@ export class SplitPane {
         prompt,action,editing,model:this.model.value||null,effort:this.effort.value||null
       }),scoped);
       this.setTurnId(id,started.turnId);
-      this.drafts.set(id,'');
-      if(this.threadId===id&&this.prompt.value.trim()===prompt)this.prompt.value='';
+      this.stateFor(id).draft='';
+      if(this.threadId===id&&this.prompt.value.trim()===prompt){this.prompt.value='';this.saveChatState();}
       this.notify('分割チャットで実行を開始しました');
     }catch(error){
       running.delete(id);
       this.setMessages(id,(this.getMessages(id)||[]).filter(m=>m!==optimistic));
       this.renderLog();
-      this.notify('分割チャットの実行失敗: '+error.message,true);
+      this.notify('分割チャットを開始できませんでした',true);
     }finally{this.updateButtons();this.onSharedStatus();}
   }
   async stop(){
@@ -200,7 +309,7 @@ export class SplitPane {
     try{
       await this.api('/api/threads/'+encodeURIComponent(id)+'/interrupt',this.post({turnId}),{workspace:cwd,explicit:true});
       this.notify('対象チャットに中断を要求しました');
-    }catch(error){this.notify('中断失敗: '+error.message,true);}
+    }catch{this.notify('分割チャットを中断できませんでした',true);}
   }
   async createThread(){
     const cwd=this.workspace;
@@ -218,7 +327,7 @@ export class SplitPane {
       }
       await this.selectThread(response.thread.id);
       this.threadSelect.value=this.threadId;
-    }catch(error){this.notify('新しいチャットの作成に失敗: '+error.message,true);}
+    }catch{this.notify('新しい分割チャットを作成できませんでした',true);}
   }
   renderApprovals(){
     const list=document.getElementById('secondary-approvals');list.replaceChildren();
@@ -243,7 +352,7 @@ export class SplitPane {
               this.post({decision,threadId:request.threadId,turnId:request.turnId}),
               {workspace:this.workspace,explicit:true});
             this.afterApproval(request.approvalId);
-          }catch(error){this.notify('承認応答に失敗: '+error.message,true);
+          }catch{this.notify('分割チャットの承認に応答できませんでした',true);
             for(const b of actions.querySelectorAll('button'))b.disabled=false;}
         });
         actions.append(button);

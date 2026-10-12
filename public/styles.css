@@ -572,7 +572,12 @@ html[lang="en"] .hotbar-controls button{
 .split-toggle[aria-pressed="true"]{background:#56795c;border-color:#d5e8bc}
 .split-toggle:focus-visible{outline:3px solid #f6da7f;outline-offset:2px}
 .quest-panes{min-width:0;display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
-.quest-panes.is-split{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}
+.quest-panes.is-split{grid-template-columns:minmax(0,var(--split-primary-width,50%)) 10px minmax(0,1fr);gap:6px;align-items:start}
+.split-separator{align-self:stretch;min-height:360px;cursor:col-resize;touch-action:none;border:2px solid #283e34;background:repeating-linear-gradient(180deg,#6f8b70 0 12px,#405f4b 12px 24px);box-shadow:inset 2px 0 #a7c39d,inset -2px 0 #1c3126}
+.split-separator[hidden]{display:none!important}
+.split-separator:focus-visible{outline:3px solid #f6da7f;outline-offset:2px}
+.split-mobile-tabs{display:none}
+.split-mobile-tabs[hidden]{display:none!important}
 .secondary-quest[hidden]{display:none!important}
 .secondary-quest,.secondary-quest .quest-paper,.secondary-quest .quest-header{min-width:0}
 .split-paper{padding:12px}
@@ -609,10 +614,17 @@ html[lang="en"] .hotbar-controls button{
   .split-view .thread-list{max-height:130px}
   .split-view .quest-panes{grid-column:1}
 }
-@media(max-width:720px){
+@media(max-width:767px){
   .split-view .threads-column{display:block}
   .quest-panes.is-split{grid-template-columns:minmax(0,1fr)}
   .split-view .quest-panes{grid-column:1}
+  .quest-panes.is-split .split-mobile-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .split-mobile-tabs button{min-width:0;min-height:40px;border:2px solid #657d64;background:#314d3c;color:#f4f4df;font:800 12px ui-monospace,Consolas,monospace;cursor:pointer}
+  .split-mobile-tabs button[aria-selected="true"]{background:#dce8d5;color:#253d2d;border-color:#29412f;box-shadow:inset 0 -3px #79a67d}
+  .split-mobile-tabs button:focus-visible{outline:3px solid #f6da7f;outline-offset:2px}
+  .quest-panes.is-split .split-separator{display:none!important}
+  .quest-panes.is-split[data-active-pane="primary"] .secondary-quest,
+  .quest-panes.is-split[data-active-pane="secondary"] .primary-quest{display:none!important}
 }
 
 /* v0.7 other-chat command-style overlay. No prompt/output content. */
@@ -622,6 +634,10 @@ html[lang="en"] .hotbar-controls button{
 .activity-feed-heading button{background:transparent;border:1px solid #6a836c;color:#f1f3e8;cursor:pointer;min-width:28px;min-height:26px}
 .activity-feed-list{display:flex;flex-direction:column;max-height:52vh;overflow:auto}
 .activity-feed-entry{background:transparent;text-align:left;border:0;color:#f1f3e8;display:flex;gap:8px;padding:4px 3px;font:inherit;cursor:pointer;overflow-wrap:anywhere}
+.activity-feed-item{display:flex;align-items:stretch;min-width:0;gap:4px}
+.activity-feed-item .activity-feed-entry{flex:1;min-width:0}
+.activity-dismiss{flex:none;align-self:center;border:1px solid #6a836c;background:transparent;color:#f1f3e8;cursor:pointer;min-width:26px;min-height:26px;font:inherit}
+.activity-dismiss:hover,.activity-dismiss:focus-visible{background:rgba(180,200,180,.18);outline:1px solid #c2cdb7}
 .activity-feed-entry:hover,.activity-feed-entry:focus-visible{background:rgba(180,200,180,.18);outline:1px solid #c2cdb7}
 .activity-feed-entry strong{color:#aad9eb;white-space:nowrap;max-width:125px;text-overflow:ellipsis;overflow:hidden}
 .activity-approval span,.activity-failed span{color:#ffd68d}
@@ -629,6 +645,12 @@ html[lang="en"] .hotbar-controls button{
 .activity-feed-entry:disabled{cursor:default}
 @media(max-width:500px){.activity-feed{left:12px;bottom:12px;width:calc(100vw - 24px)}}
 @media(prefers-reduced-motion:reduce){.activity-feed{backdrop-filter:none}}
+
+.workspace-conflicts{position:fixed;right:16px;bottom:18px;z-index:91;width:min(390px,calc(100vw - 32px));box-sizing:border-box;max-height:45vh;overflow:auto;padding:10px 12px;border:2px solid #a57432;background:#fff0c6;color:#432f15;box-shadow:3px 4px 0 #37291599;font:12px/1.5 ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+.workspace-conflicts[hidden]{display:none!important}
+.workspace-conflicts button{border:2px solid #8e6637;background:#fff8e5;color:#432f15;cursor:pointer;min-height:28px}
+.workspace-conflicts button:focus-visible{outline:3px solid #354d34;outline-offset:2px}
+@media(max-width:500px){.workspace-conflicts{right:12px;bottom:54px;width:calc(100vw - 24px)}}
 
 /* Persistent compact launcher for faded activity history. */
 .activity-feed-launcher[hidden]{display:none!important}

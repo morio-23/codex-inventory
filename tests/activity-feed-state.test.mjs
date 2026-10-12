@@ -71,3 +71,30 @@ test('approval reset and reconnect clear only targeted persistent messages',()=>
  assert.equal(t.record({threadId:'',kind:'disconnected',key:'connection',persistent:true},3),true);
  assert.deepEqual(t.entries.map(x=>x.kind),['completed','approval','disconnected']);
 });
+
+test('failed turn remains visible until acknowledged and stays in expanded history',()=>{
+ const t=new ActivityTimeline();
+ const failure=activityFromCodex({type:'codex',method:'turn/completed',threadId:'demo-A',
+   params:{turn:{id:'turn-1',status:'failed',error:{message:'synthetic private detail'}}}});
+ assert.equal(failure.persistent,true);
+ t.record(failure,0);
+ assert.deepEqual(t.visible({now:9000}).map(x=>x.kind),['failed']);
+ assert.equal(t.dismiss(failure.key),true);
+ assert.deepEqual(t.visible({now:9001}),[]);
+ assert.deepEqual(t.visible({now:9001,expanded:true}).map(x=>x.kind),['failed']);
+ assert.equal(t.record(failure,9002),false);
+ assert.equal(JSON.stringify(t.entries).includes('synthetic private detail'),false);
+});
+
+test('approval list reconciliation keeps pending requests and removes expired ones without replay',()=>{
+ const t=new ActivityTimeline();
+ const pending=activityFromCodex({type:'approval-request',approval:{
+   approvalId:'1',threadId:'demo-A',turnId:'turn-1'}});
+ t.record(pending,0);
+ assert.deepEqual(t.visible({now:9000}).map(x=>x.kind),['approval']);
+ t.reconcileApprovals([pending.key]);
+ assert.equal(t.entries.length,1);
+ t.reconcileApprovals([]);
+ assert.deepEqual(t.visible({now:9001}),[]);
+ assert.equal(t.record(pending,9002),false);
+});

@@ -4,6 +4,17 @@ import {execFileSync} from 'node:child_process';
 
 const base=process.argv[2]||'main';
 const run=(args)=>execFileSync('git',args,{encoding:'utf8',maxBuffer:20*1024*1024,stdio:['ignore','pipe','pipe']});
+function comparisonBase(){
+  run(['rev-parse','--verify',base]);
+  try{run(['merge-base',base,'HEAD']);return base;}
+  catch(error){
+    if(base!=='main')throw error;
+    run(['rev-parse','--verify','origin/main']);
+    run(['merge-base','origin/main','HEAD']);
+    console.log('Local main has no common ancestor; comparing against origin/main.');
+    return 'origin/main';
+  }
+}
 const checks=[
   ['API key / secret',/(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{18,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----/],
   ['Windows profile path',/[A-Za-z]:[\\/]+Users[\\/]+[A-Za-z0-9_.-]{2,}/i],
@@ -27,8 +38,8 @@ function scan(label,patch){
 }
 let findings=[];
 try{
-  run(['rev-parse','--verify',base]);
-  findings.push(...scan('commits',run(['diff','--no-ext-diff','--unified=0',base+'...HEAD','--'])));
+  const resolvedBase=comparisonBase();
+  findings.push(...scan('commits',run(['diff','--no-ext-diff','--unified=0',resolvedBase+'...HEAD','--'])));
   findings.push(...scan('staged',run(['diff','--cached','--no-ext-diff','--unified=0','--'])));
   findings.push(...scan('working',run(['diff','--no-ext-diff','--unified=0','--'])));
 }catch(error){
