@@ -32,3 +32,14 @@ test('token stream never creates activity, command bursts merge',()=>{
  t.record({threadId:'demo-A',kind:'command',key:'command:demo-2'},2);
  assert.equal(t.entries.length,1);
 });
+
+test('approval reset and reconnect clear only targeted persistent messages',()=>{
+ const t=new ActivityTimeline();
+ t.record({threadId:'demo-A',kind:'approval',key:'approval:demo-6',persistent:true},1);
+ t.record({threadId:'',kind:'disconnected',key:'connection',persistent:true},2);
+ t.record({threadId:'demo-B',kind:'completed',key:'finish:demo-7'},2);
+ t.clearApprovals();
+ assert.deepEqual(t.entries.map(x=>x.kind),['disconnected','completed']);
+ t.clearConnection();
+ assert.deepEqual(t.entries.map(x=>x.kind),['completed']);
+});
