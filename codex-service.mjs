@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { resolve, win32, basename } from 'node:path';
+import { resolve, relative, isAbsolute, win32, basename } from 'node:path';
+import {realpathSync} from 'node:fs';
 import { stat, realpath } from 'node:fs/promises';
 import {resetCreditSummary} from './reset-credit-service.mjs';
 import {normalizeModelCatalog,resolveModelSelection} from './model-selection.mjs';
@@ -13,6 +14,18 @@ export function sameWorkspace(a,b) {
     return win32.normalize(a).toLowerCase()===win32.normalize(b).toLowerCase();
   }
   return resolve(a)===resolve(b);
+}
+
+function withinWorkspace(path,workspace){
+  if(typeof path!=='string'||typeof workspace!=='string'||
+    !(isAbsolute(path)||win32.isAbsolute(path)))return false;
+  try{
+    const target=realpathSync(path),root=realpathSync(workspace);
+    const windows=/^[A-Za-z]:[\\/]|^\\\\/.test(root);
+    const delta=windows?win32.relative(root,target):relative(root,target);
+    return delta===''||delta!=='..'&&!delta.startsWith(windows?'..\\':'../')&&
+      !(windows?win32.isAbsolute(delta):isAbsolute(delta));
+  }catch{return false;}
 }
 
 export const taskInstructions = {
@@ -56,15 +69,63 @@ export class CodexService extends EventEmitter {
   constructor(client,{workspace=process.cwd(),autoDiscover=false,knownProjects=[]}={}) {
     super();this.client=client;this.autoDiscover=autoDiscover;this.workspace=autoDiscover?null:resolve(workspace);
     this.projects=[];this.discoveryAt=0;this.discoveryPromise=null;
+    this.connectionEpoch=0;this.needsRecovery=true;this.recoveryPromise=null;
     this.knownProjects=new Set(Array.isArray(knownProjects)?knownProjects.filter(x=>typeof x==='string'&&x.length<=4096):[]);
     this.approvals=new Map();this.approvalSequence=0;this.turnWorkspaces=new Map();
-    this.running=new Map();this.finishedTurns=new Set();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();
+    this.running=new Map();this.editingThreads=new Set();this.finishedTurns=new Set();this.earlyCompletions=new Map();this.earlyApprovals=new Map();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();
     client.on('notification',e=>this.#notification(e));
     client.on('server-request',e=>this.#onApproval(e));
-    client.on('disconnect',error=>{this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.subscribed.clear();this.emit('event',{type:'connection',error:error.message});});
+    client.on('disconnect',error=>{this.connectionEpoch++;this.needsRecovery=true;this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.editingThreads.clear();this.finishedTurns.clear();this.earlyCompletions.clear();this.earlyApprovals.clear();this.subscribed.clear();this.emit('event',{type:'connection',error:error.message});});
     client.on('warning',message=>this.emit('event',{type:'warning',text:message}));
   }
-  async start(){await this.client.start();}
+  async start(){
+    await this.client.start();
+    if(!this.needsRecovery)return;
+    if(!this.recoveryPromise){
+      const epoch=this.connectionEpoch;
+      this.recoveryPromise=this.#recoverRunning(epoch).then(()=>{
+        if(epoch===this.connectionEpoch)this.needsRecovery=false;
+      }).finally(()=>{this.recoveryPromise=null;});
+    }
+    await this.recoveryPromise;
+  }
+  async #recoverRunning(epoch){
+    const {threads}=await this.listThreads({all:true});
+    for(const thread of threads){
+      if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
+      if(thread.status?.type!=='active')continue;
+      let workspace;
+      try{workspace=await this.validateWorkspace(thread.cwd);}catch{continue;}
+      const response=await this.client.request('thread/read',
+        {threadId:thread.id,includeTurns:true},{timeoutMs:60000});
+      const turn=[...(response.thread?.turns||[])].reverse().find(item=>
+        item?.status==='inProgress'||item?.status==='in_progress');
+      if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
+      if(typeof turn?.id!=='string'||!sameWorkspace(response.thread?.cwd,workspace))continue;
+      this.running.set(thread.id,turn.id);this.turnWorkspaces.set(thread.id,workspace);
+      // The App Server does not expose the original sandbox choice here.
+      // Treat an unknown recovered turn as an editor for conservative warnings.
+      this.editingThreads.add(thread.id);
+    }
+    this.#emitActivityState();
+  }
+  activityState(){
+    const groups=[];
+    for(const threadId of this.running.keys()){
+      const workspace=this.turnWorkspaces.get(threadId);
+      if(!workspace)continue;
+      let group=groups.find(item=>sameWorkspace(item.workspace,workspace));
+      if(!group){group={workspace,threadIds:[],editing:0};groups.push(group);}
+      group.threadIds.push(threadId);
+      if(this.editingThreads.has(threadId))group.editing++;
+    }
+    return {runningThreadIds:[...this.running.keys()],runningTurns:[...this.running]
+      .filter(([,turnId])=>turnId!=='starting'&&turnId!=='started')
+      .map(([threadId,turnId])=>({threadId,turnId})),workspaceConflicts:groups
+      .filter(item=>item.editing>1)
+      .map(item=>({threadIds:item.threadIds,reason:'parallel-edits'}))};
+  }
+  #emitActivityState(){this.emit('event',{type:'activity-state',...this.activityState()});}
   async listThreads({all=false,limit=100}={}) {
     if(!all&&!this.workspace)return {threads:[],nextCursor:null};
     const data=[];let cursor=null;let pages=0;
@@ -160,6 +221,8 @@ export class CodexService extends EventEmitter {
       throw Object.assign(new Error('プロジェクト指定の形式が不正です'),{status:400});
     if(!this.autoDiscover){
       if(!sameWorkspace(cwd,this.workspace))throw Object.assign(new Error('固定ワークスペース以外を指定できません'),{status:403});
+      try{if(!(await stat(await realpath(this.workspace))).isDirectory())throw Error('not a directory');}
+      catch{throw Object.assign(new Error('固定ワークスペースが変更・削除されています'),{status:409});}
       return this.workspace;
     }
     const {projects}=await this.discoverProjects({force:true});
@@ -204,11 +267,15 @@ export class CodexService extends EventEmitter {
     return resolveModelSelection(await this.listModels(),{model,effort});
   }
   async createThread({editing=false,model=null,effort=null,workspace=null}={}) {
+    await this.start();
+    const epoch=this.connectionEpoch;
     const cwd=workspace?await this.validateWorkspace(workspace):this.workspace;
     if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409});
     const selected=await this.selectedModel({model,effort});
     const preferred=selected.model||((await this.listModels().catch(()=>null))?.defaultModel);
+    await this.validateWorkspace(cwd);
     if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。再度新規作成してください'),{status:409});
+    if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
     const result=await this.client.request('thread/start',{cwd,approvalPolicy:'on-request',sandbox:editing?'workspace-write':'read-only',ephemeral:false,...(preferred?{model:preferred}:{})});
     const thread={...simplifyThread(result.thread),cwd:result.thread?.cwd||cwd};this.subscribed.add(thread.id);this.knownThreads.set(thread.id,thread);
     this.emit('event',{type:'thread',threadId:thread.id,thread});
@@ -221,27 +288,50 @@ export class CodexService extends EventEmitter {
     this.subscribed.add(threadId);
   }
   async startTurn({threadId,prompt,action='quest',editing=false,model=null,effort=null,workspace=null}) {
+    await this.start();
+    const epoch=this.connectionEpoch;
     const cwd=workspace?await this.validateWorkspace(workspace):this.workspace;
     if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409});
     if(!threadId||typeof prompt!=='string'||!prompt.trim()||prompt.length>10000||!Object.hasOwn(taskInstructions,action)) throw new Error('任務の内容が不正です');
     if((action==='fix'||action==='build')&&!editing)throw new Error('実装・修正には編集許可が必要です');
     if(this.running.has(threadId))throw new Error('このスレッドは実行中です');
     this.running.set(threadId,'starting');this.turnWorkspaces.set(threadId,cwd);
+    if(editing)this.editingThreads.add(threadId);
+    this.#emitActivityState();
     try {
       const record=await this.readThread(threadId);
+      if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       if(!sameWorkspace(record.thread?.cwd,cwd)) throw Object.assign(new Error('別プロジェクトのチャットです。画面で所属プロジェクトを選択してください。'),{status:409});
       const selection=await this.selectedModel({model,effort});
+      if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       await this.ensureSubscribed(threadId);
+      if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
+      await this.validateWorkspace(cwd);
       if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409});
       const text=action==='quest'?prompt.trim():`${taskInstructions[action]}\n\n【ユーザー依頼】\n${prompt.trim()}`;
       const input=[{type:'text',text}];
       const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',sandboxPolicy:editing?{type:'workspaceWrite',writableRoots:[cwd],networkAccess:false}:{type:'readOnly'}},{timeoutMs:60000});
+      if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       const turnId=result?.turn?.id;
-      if (!this.finishedTurns.has(turnId)) this.running.set(threadId,turnId||'started');
-      else this.finishedTurns.delete(turnId);
+      const early=this.earlyCompletions.get(threadId)?.get(turnId);
+      this.earlyCompletions.delete(threadId);
+      const completedEarly=early||null;
+      if (!this.finishedTurns.has(turnId)&&!completedEarly) this.running.set(threadId,turnId||'started');
+      else {this.finishedTurns.delete(turnId);this.running.delete(threadId);this.turnWorkspaces.delete(threadId);this.editingThreads.delete(threadId);}
+      this.#drainEarlyApprovals(threadId,completedEarly?null:turnId);
+      this.#emitActivityState();
       this.emit('event',{type:'turn-start',threadId,turnId,prompt:prompt.trim(),action,requestedModel:selection.model||null,requestedEffort:selection.effort||null});
+      if(completedEarly)this.emit('event',{type:'codex',method:'turn/completed',threadId,params:completedEarly});
       return {threadId,turnId,requestedModel:selection.model||null,requestedEffort:selection.effort||null};
-    } catch(error) {this.running.delete(threadId);this.turnWorkspaces.delete(threadId);throw error;}
+    } catch(error) {if(epoch===this.connectionEpoch){this.#drainEarlyApprovals(threadId,null);this.running.delete(threadId);this.turnWorkspaces.delete(threadId);this.editingThreads.delete(threadId);this.earlyCompletions.delete(threadId);this.#emitActivityState();}throw error;}
+  }
+  #drainEarlyApprovals(threadId,turnId){
+    const requests=this.earlyApprovals.get(threadId)||[];
+    this.earlyApprovals.delete(threadId);
+    for(const request of requests){
+      if(turnId&&request.params?.turnId===turnId)this.#onApproval(request);
+      else this.#rejectApprovalRequest(request.id,request.method);
+    }
   }
   #clearApprovals(){
     for(const value of this.approvals.values())clearTimeout(value.timer);
@@ -259,9 +349,17 @@ export class CodexService extends EventEmitter {
     const runningTurn=this.running.get(threadId);
     const workspace=this.turnWorkspaces.get(threadId);
     if(typeof threadId!=='string'||typeof turnId!=='string'||!workspace||
-      !runningTurn||runningTurn!=='starting'&&runningTurn!=='started'&&runningTurn!==turnId){
+      params.cwd!=null&&!withinWorkspace(params.cwd,workspace)||
+      params.grantRoot!=null&&!withinWorkspace(params.grantRoot,workspace)){
       this.#rejectApprovalRequest(id,method);return;
     }
+    if(runningTurn==='starting'){
+      const pending=this.earlyApprovals.get(threadId)||[];
+      if(pending.length>=10){this.#rejectApprovalRequest(id,method);return;}
+      pending.push({id,method,params});this.earlyApprovals.set(threadId,pending);
+      return;
+    }
+    if(runningTurn!==turnId){this.#rejectApprovalRequest(id,method);return;}
     const approvalId=String(++this.approvalSequence);
     const expiresAt=Date.now()+120_000;
     const timer=setTimeout(()=>{
@@ -289,7 +387,7 @@ export class CodexService extends EventEmitter {
   listApprovals(workspace=null){
     return {approvals:[...this.approvals.values()].filter(e=>!workspace||sameWorkspace(e.workspace,workspace)).map(e=>e.public)};
   }
-  respondApproval({approvalId,decision,workspace,explicit=false}){
+  respondApproval({approvalId,decision,workspace,threadId=null,turnId=null,explicit=false}){
     if(!['accept','acceptForSession','decline','cancel'].includes(decision))
       throw Object.assign(new Error('承認操作が不正です'),{status:400});
     const entry=this.approvals.get(approvalId);
@@ -300,6 +398,13 @@ export class CodexService extends EventEmitter {
       this.emit('event',{type:'approval-resolved',approvalId,threadId:entry.threadId,turnId:entry.turnId,decision:'decline',reason:'timeout'});
       throw Object.assign(new Error('承認要求は期限切れです'),{status:409});
     }
+    if(explicit&&(typeof threadId!=='string'||typeof turnId!=='string'))
+      throw Object.assign(new Error('承認対象のチャットとターンを指定してください'),{status:400});
+    if((threadId!==null||turnId!==null)&&(threadId!==entry.threadId||turnId!==entry.turnId))
+      throw Object.assign(new Error('承認対象のチャットまたはターンが一致しません'),{status:409});
+    if(threadId===null&&turnId===null&&[...this.approvals.values()]
+      .filter(value=>sameWorkspace(value.workspace,workspace)).length>1)
+      throw Object.assign(new Error('複数の承認要求があります。対象を指定してください'),{status:409});
     if(!sameWorkspace(entry.workspace,workspace)||(!explicit&&!sameWorkspace(entry.workspace,this.workspace)))
       throw Object.assign(new Error('対象プロジェクトが一致しません'),{status:409});
     const runningTurn=this.running.get(entry.threadId);
@@ -322,9 +427,13 @@ export class CodexService extends EventEmitter {
     this.emit('event',{type:'approval-resolved',approvalId,threadId:entry.threadId,turnId:entry.turnId,decision});
     return {ok:true,approvalId,decision};
   }
-  async interrupt(threadId){
+  async interrupt(threadId,{workspace=this.workspace,turnId:expectedTurnId=null}={}){
+    await this.start();
     const turnId=this.running.get(threadId);
     if(!turnId||turnId==='starting')throw new Error('停止可能な実行がありません');
+    if(!sameWorkspace(this.turnWorkspaces.get(threadId),workspace)||
+      expectedTurnId!==null&&expectedTurnId!==turnId)
+      throw Object.assign(new Error('対象ターンまたはプロジェクトが一致しません'),{status:409});
     for(const [key,entry] of this.approvals){
       if(entry.threadId!==threadId)continue;
       this.approvals.delete(key);clearTimeout(entry.timer);
@@ -346,13 +455,31 @@ export class CodexService extends EventEmitter {
   #notification({method,params}) {
     const threadId=params.threadId||params.thread?.id||null;
     if(method==='thread/tokenUsage/updated' && threadId)this.tokenUsage.set(threadId,params.tokenUsage||params);
+    if(method==='turn/started'&&threadId&&this.running.has(threadId)){
+      const active=this.running.get(threadId);
+      if(active==='starting'||active!==params.turn?.id)return;
+    }
     if(method==='turn/completed' && threadId){
+      const active=this.running.get(threadId),completedId=params.turn?.id;
+      if(active==='starting'){
+        if(typeof completedId==='string'){
+          let pending=this.earlyCompletions.get(threadId);
+          if(!pending){pending=new Map();this.earlyCompletions.set(threadId,pending);}
+          pending.set(completedId,params);
+          while(pending.size>10)pending.delete(pending.keys().next().value);
+        }
+        return;
+      }
+      if(active!==completedId||typeof completedId!=='string')return;
       for(const [key,entry] of this.approvals)if(entry.threadId===threadId){
         this.approvals.delete(key);clearTimeout(entry.timer);
         this.#rejectApprovalRequest(entry.id,entry.method)
         this.emit('event',{type:'approval-resolved',approvalId:key,threadId,turnId:entry.turnId,decision:'cancel'});
       }
-      this.running.delete(threadId);this.turnWorkspaces.delete(threadId);if(params.turn?.id)this.finishedTurns.add(params.turn.id);}
+      this.running.delete(threadId);this.turnWorkspaces.delete(threadId);this.editingThreads.delete(threadId);
+      this.finishedTurns.add(completedId);
+      while(this.finishedTurns.size>100)this.finishedTurns.delete(this.finishedTurns.values().next().value);
+      this.#emitActivityState();}
     const forwarded = ['thread/started','thread/name/updated','thread/status/changed','thread/tokenUsage/updated','turn/started','turn/completed','item/started','item/completed','item/agentMessage/delta','item/commandExecution/outputDelta','turn/plan/updated','turn/diff/updated','account/rateLimits/updated'];
     if(forwarded.includes(method))this.emit('event',{type:'codex',method,threadId,params});
   }

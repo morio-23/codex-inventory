@@ -92,11 +92,16 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         const ping=setInterval(()=>{if(!res.destroyed)res.write(': ping\n\n');},20000);ping.unref?.();
         req.on('close',()=>{clearInterval(ping);listeners.delete(res);});return;
       }
-      if(req.method==='GET'&&path==='/api/activity-state')return json(res,200,{runningThreadIds:[...service.running.keys()]});
+      if(req.method==='GET'&&path==='/api/activity-state'){
+        await service.start();
+        return json(res,200,service.activityState());
+      }
       if(req.method==='GET'&&path==='/api/status'){
         try{
-          await service.start();
-          let discoveryError=null;
+          await service.client.start();
+          let recoveryError=null;
+          try{await service.start();}catch(error){recoveryError=error.message;}
+          let discoveryError=recoveryError;
           if(service.autoDiscover){
             try{await service.discoverProjects();}
             catch(error){discoveryError=error.message;}
@@ -104,7 +109,7 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
           const selected=activeWorkspace();
           let exists=false;try{exists=selected?(await stat(selected)).isDirectory():false;}catch{}
           return json(res,200,{exists,workspace:selected,autoDiscover:!!service.autoDiscover,
-            projectCount:service.projects?.length||0,discoveryError,
+            projectCount:service.projects?.length||0,discoveryError,runtimeStateReady:!recoveryError,
             connected:true,active:service.running.size,demo:process.env.CODEX_DEMO==='1'});
         }catch(e){
           return json(res,200,{exists:false,workspace:activeWorkspace(),
@@ -150,12 +155,18 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         }
         if(req.method==='POST'&&m[2]==='interrupt'){
           const current=await scopedWorkspace(req);
+          const input=await readJson(req);
+          if(!input||typeof input!=='object'||Array.isArray(input)||
+            Object.keys(input).some(key=>key!=='turnId')||
+            (explicitScope(req)||input.turnId!==undefined)&&
+            (typeof input.turnId!=='string'||!validThreadId(input.turnId)))
+            return json(res,400,{error:'停止対象のターン指定が不正です'});
           if(service.autoDiscover){
             const record=await service.readThread(id);
             if(!sameWorkspace(record.thread?.cwd,current))
               return json(res,409,{error:'別プロジェクトのチャットは中断できません。所属先を選択してください'});
           }
-          return json(res,200,await service.interrupt(id));
+          return json(res,200,await service.interrupt(id,{workspace:current,turnId:input.turnId??null}));
         }
       }
       if(req.method==='GET'&&path==='/api/approvals'){
@@ -169,10 +180,15 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         const requestedWorkspace=await scopedWorkspace(req);
         const input=await readJson(req);
         if(!input||typeof input!=='object'||Array.isArray(input)||
-          Object.keys(input).length!==1||typeof input.decision!=='string')
+          Object.keys(input).some(key=>!['decision','threadId','turnId'].includes(key))||
+          typeof input.decision!=='string'||
+          (input.threadId!==undefined||input.turnId!==undefined)&&
+          (typeof input.threadId!=='string'||!validThreadId(input.threadId)||
+            typeof input.turnId!=='string'||!validThreadId(input.turnId)))
           return json(res,400,{error:'承認の入力形式が不正です'});
         return json(res,200,service.respondApproval({
-          approvalId:approvalMatch[1],decision:input.decision,workspace:requestedWorkspace,explicit:explicitScope(req)
+          approvalId:approvalMatch[1],decision:input.decision,workspace:requestedWorkspace,
+          threadId:input.threadId??null,turnId:input.turnId??null,explicit:explicitScope(req)
         }));
       }
       if(req.method==='GET'&&path==='/api/usage')return json(res,200,await service.usage());
