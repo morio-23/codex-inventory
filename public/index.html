@@ -161,6 +161,11 @@
     </section>
     <footer class="site-footer"><span>© CODEX INVENTORY — UNOFFICIAL LOCAL UI</span><span>ESC: 説明を閉じる <i>•</i> 1–9: アイテム選択</span></footer>
   </main>
+  <button id="activity-feed-launcher" type="button" class="activity-feed-launcher" aria-label="Show recent activity" hidden>▤ 履歴</button>
+  <section id="activity-feed" class="activity-feed" aria-label="Other chat activity" hidden>
+    <div class="activity-feed-heading"><span>▤ ACTIVITY</span><button id="activity-feed-toggle" type="button" aria-expanded="false" aria-label="Show recent activity">▴</button></div>
+    <div id="activity-feed-list" class="activity-feed-list" role="log" aria-live="off"></div>
+  </section>
   <div id="completion-toast" class="completion-toast" role="status" aria-live="polite" hidden>
     <span id="completion-toast-text"></span><button id="completion-toast-open" type="button">チャットを見る</button><button id="completion-toast-dismiss" type="button" aria-label="完了通知を閉じる">×</button>
   </div>
