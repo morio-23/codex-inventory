@@ -672,15 +672,21 @@ function renderCodexApprovals(){
   splitPane?.renderApprovals();
 }
 async function refreshCodexApprovals(){
-  if(!workspacePath)return;
   const current=workspacePath;
+  const secondary=splitPane?.enabled?splitPane.workspace:null;
+  if(!current&&!secondary)return;
   try{
-    const result=await api('/api/approvals');
-    if(current!==workspacePath)return;
+    const tasks=[];
+    if(current)tasks.push(api('/api/approvals'));
+    if(secondary&&!sameWorkspaceUi(current,secondary))
+      tasks.push(api('/api/approvals',{}, {workspace:secondary,explicit:true}));
+    const results=await Promise.all(tasks);
+    if(current!==workspacePath || secondary!==(splitPane?.enabled?splitPane.workspace:null))return;
     pendingCodexApprovals.clear();
-    for(const a of result.approvals||[])pendingCodexApprovals.set(a.approvalId,a);
+    for(const result of results)for(const approval of result.approvals||[])
+      pendingCodexApprovals.set(approval.approvalId,approval);
     renderCodexApprovals();
-  }catch(error){console.warn('approval refresh',error);}
+  }catch(error){console.warn('approval refresh failed');}
 }
 const activityLabels={
   ja:{started:'処理を開始',command:'コマンド実行中',files:'ファイル変更',approval:'承認待ち',completed:'処理完了',failed:'実行失敗',interrupted:'中断',disconnected:'接続が切断されました'},
@@ -1397,6 +1403,7 @@ async function boot(){
     appendMessage,renderMarkdown,
     getApprovals:()=>[...pendingCodexApprovals.values()],
     afterApproval:id=>{pendingCodexApprovals.delete(id);renderCodexApprovals();},
+    refreshApprovals:()=>refreshCodexApprovals(),
     onSharedStatus:()=>{drawThreads();updateButtons();}
   });
   buildInventory();
