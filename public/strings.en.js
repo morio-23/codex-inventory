@@ -1,5 +1,6 @@
 // Reviewed UI translations. Values are display-only; never identifiers.
 export default {
+  "別のチャットへの依頼": "Prompt for another chat",
   "◫ 2画面": "◫ Split view",
   "▣ 1画面": "▣ Single view",
   "✣ 分割チャット": "✣ Split chat",
