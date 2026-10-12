@@ -62,8 +62,9 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
     if(!value)throw Object.assign(new Error('App Serverで検出したプロジェクトを選択してください'),{status:409});
     return value;
   };
-  const scopedWorkspace=req=>{
-    const cwd=requireWorkspace();
+  const explicitScope=req=>req.headers['x-codex-workspace-mode']==='explicit';
+  const scopedWorkspace=async req=>{
+    const cwd=explicitScope(req)?null:requireWorkspace();
     // Unicode workspace paths must arrive encoded as ASCII in HTTP headers.
     // Invalid percent/UTF-8 sequences must fail closed, not bypass the
     // protection against a stale tab writing to another selected project.
@@ -72,6 +73,7 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
     if(typeof header==='string'){
       try{requestedWorkspace=decodeURIComponent(header);}catch{}
     }
+    if(explicitScope(req))return service.validateWorkspace(requestedWorkspace);
     if(service.autoDiscover&&!sameWorkspace(requestedWorkspace,cwd))
       throw Object.assign(new Error('プロジェクトが切り替わりました。画面を更新して再実行してください'),{status:409});
     return cwd;
@@ -127,8 +129,8 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         if(!data||typeof data!=='object'||Array.isArray(data)||
           typeof data.editing!=='boolean'||!validModelChoice(data))
           return json(res,400,{error:'モデル・推論レベルまたは編集許可の指定が不正です'});
-        scopedWorkspace(req);
-        return json(res,201,await service.createThread(data));
+        const selected=await scopedWorkspace(req);
+        return json(res,201,await service.createThread({...data,...(explicitScope(req)?{workspace:selected}:{})}));
       }
       const m=path.match(/^\/api\/threads\/([^/]+)(?:\/(turn|interrupt))?$/);
       if(m){
@@ -140,11 +142,11 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
             typeof input.editing!=='boolean'||typeof input.prompt!=='string'||
             typeof input.action!=='string'||!validModelChoice(input))
             return json(res,400,{error:'モデル・推論レベルまたは入力形式が不正です'});
-          scopedWorkspace(req);
-          return json(res,202,await service.startTurn({threadId:id,...input}));
+          const selected=await scopedWorkspace(req);
+          return json(res,202,await service.startTurn({threadId:id,...input,...(explicitScope(req)?{workspace:selected}:{})}));
         }
         if(req.method==='POST'&&m[2]==='interrupt'){
-          const current=scopedWorkspace(req);
+          const current=await scopedWorkspace(req);
           if(service.autoDiscover){
             const record=await service.readThread(id);
             if(!sameWorkspace(record.thread?.cwd,current))
@@ -154,20 +156,20 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         }
       }
       if(req.method==='GET'&&path==='/api/approvals'){
-        const requestedWorkspace=scopedWorkspace(req);
+        const requestedWorkspace=await scopedWorkspace(req);
         return json(res,200,service.listApprovals(requestedWorkspace));
       }
       const approvalMatch=path.match(/^\/api\/approvals\/([0-9]+)\/respond$/);
       if(req.method==='POST'&&approvalMatch){
         if(req.headers.origin!==`http://${req.headers.host}`)
           return json(res,403,{error:'承認は同一オリジンの画面からのみ操作できます'});
-        const requestedWorkspace=scopedWorkspace(req);
+        const requestedWorkspace=await scopedWorkspace(req);
         const input=await readJson(req);
         if(!input||typeof input!=='object'||Array.isArray(input)||
           Object.keys(input).length!==1||typeof input.decision!=='string')
           return json(res,400,{error:'承認の入力形式が不正です'});
         return json(res,200,service.respondApproval({
-          approvalId:approvalMatch[1],decision:input.decision,workspace:requestedWorkspace
+          approvalId:approvalMatch[1],decision:input.decision,workspace:requestedWorkspace,explicit:explicitScope(req)
         }));
       }
       if(req.method==='GET'&&path==='/api/usage')return json(res,200,await service.usage());
@@ -192,13 +194,13 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
       if(req.method==='GET'&&path==='/api/templates')return json(res,200,{templates:listPromptTemplates()});
       const previewMatch=path.match(/^\/api\/local-tools\/(project-test|project-lint)\/preview$/);
       if(req.method==='GET'&&previewMatch)
-        return json(res,200,await approvals.issue(previewMatch[1],scopedWorkspace(req)));
+        return json(res,200,await approvals.issue(previewMatch[1],await scopedWorkspace(req)));
       const localMatch=path.match(/^\/api\/local-tools\/([a-z0-9-]+)$/);
       if(req.method==='POST'&&localMatch){
         const input=await readJson(req);
         if(!input||typeof input!=='object'||Array.isArray(input))
           return json(res,400,{error:'入力形式が不正です'});
-        const cwd=scopedWorkspace(req);
+        const cwd=await scopedWorkspace(req);
         const requiresApproval=['project-test','project-lint'].includes(localMatch[1]);
         let approval;
         if(requiresApproval){
@@ -211,7 +213,7 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         return json(res,200,await runLocalTool(localMatch[1],{workspace:cwd,input,approval,signal:controller.signal}));
       }
       if(req.method==='GET'&&path==='/api/diff'){
-        const cwd=scopedWorkspace(req);
+        const cwd=await scopedWorkspace(req);
         const [status,diff]=await Promise.all([
           execFileAsync('git',['status','--short'],{cwd,maxBuffer:1_000_000}),
           execFileAsync('git',['diff','--no-ext-diff','--stat'],{cwd,maxBuffer:1_000_000})
