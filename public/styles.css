@@ -566,3 +566,18 @@ html[lang="en"] .hotbar-controls button{
   .language-picker select{max-width:90px;min-width:70px;padding:4px}
   html[lang="en"] .featured-item{flex-basis:260px}
 }
+
+/* v0.7 other-chat command-style overlay. No prompt/output content. */
+.activity-feed[hidden]{display:none!important}
+.activity-feed{position:fixed;bottom:18px;left:16px;z-index:90;width:min(410px,calc(100vw - 32px));border:2px solid #54735a;background:rgba(18,25,23,.83);color:#f1f3e8;padding:7px 9px;box-shadow:3px 4px 0 #08120dac;box-sizing:border-box;font:12px/1.55 ui-monospace,Consolas,monospace;backdrop-filter:blur(3px)}
+.activity-feed-heading{display:flex;justify-content:space-between;align-items:center;color:#b5c8b1;font-size:10px;letter-spacing:.08em}
+.activity-feed-heading button{background:transparent;border:1px solid #6a836c;color:#f1f3e8;cursor:pointer;min-width:28px;min-height:26px}
+.activity-feed-list{display:flex;flex-direction:column;max-height:52vh;overflow:auto}
+.activity-feed-entry{background:transparent;text-align:left;border:0;color:#f1f3e8;display:flex;gap:8px;padding:4px 3px;font:inherit;cursor:pointer;overflow-wrap:anywhere}
+.activity-feed-entry:hover,.activity-feed-entry:focus-visible{background:rgba(180,200,180,.18);outline:1px solid #c2cdb7}
+.activity-feed-entry strong{color:#aad9eb;white-space:nowrap;max-width:125px;text-overflow:ellipsis;overflow:hidden}
+.activity-approval span,.activity-failed span{color:#ffd68d}
+.activity-completed span{color:#95e9ac}
+.activity-feed-entry:disabled{cursor:default}
+@media(max-width:500px){.activity-feed{left:12px;bottom:12px;width:calc(100vw - 24px)}}
+@media(prefers-reduced-motion:reduce){.activity-feed{backdrop-filter:none}}
