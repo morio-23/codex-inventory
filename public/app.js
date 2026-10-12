@@ -1,4 +1,5 @@
 import { renderMarkdown } from './markdown.js';
+import { ActivityTimeline, activityFromCodex } from './activity-feed-state.js';
 import {categories,initialState,loadState,saveState,mergedTemplates,variablesOf,validateTemplate,parseTemplateImport,exportTemplateJson} from './inventory-state.js';
 import {setupLanguage,getLanguage,getLocale,t,translateDom} from './i18n.js';
 import englishTemplates from './templates.en.js';
@@ -31,6 +32,10 @@ const $ = id => document.getElementById(id);
 const threadList = $('thread-list');
 const tooltip = $('tooltip');
 const logs = new Map();
+const activityTimeline = new ActivityTimeline();
+let activityExpanded = false;
+let activityHover = false;
+let activityRefreshTimer = null;
 // Keep intentionally expanded commands open when streaming redraws the log.
 const expandedCommands = new Set();
 const completedTurnKeys=new Set();
@@ -419,7 +424,7 @@ async function selectThread(id){
   $('prompt').value=draftPrompts.get(id)||'';
   $('prompt').dataset.suggested='no';
   updateSendPreview();
-  drawThreads();drawLog();updateButtons();
+  drawThreads();drawLog();updateButtons();renderActivityFeed();
   if(!id)return;
   refreshUsage();
   try{
@@ -665,7 +670,55 @@ async function refreshCodexApprovals(){
     renderCodexApprovals();
   }catch(error){console.warn('approval refresh',error);}
 }
+
+const activityLabels={
+  ja:{started:'処理を開始',command:'コマンド実行中',files:'ファイル変更',approval:'承認待ち',completed:'処理完了',failed:'実行失敗',interrupted:'中断',disconnected:'接続が切断されました'},
+  en:{started:'Started',command:'Command running',files:'Files changed',approval:'Approval required',completed:'Completed',failed:'Failed',interrupted:'Interrupted',disconnected:'Disconnected'}
+};
+function activityThreadName(id) {
+  if(!id)return getLanguage()==='en'?'App Server':'App Server';
+  const thread=threads.find(x=>x.id===id);
+  // Previews can be a private user prompt: never put them in the overlay.
+  const cwd=thread?.cwd||'';
+  const name=detectedProjects.find(x=>sameWorkspaceUi(x.cwd,cwd))?.name;
+  return name&&/^[a-zA-Z0-9_-]{1,32}$/.test(name)?name:(getLanguage()==='en'?'Other chat':'別チャット');
+}
+function renderActivityFeed(){
+  const root=$('activity-feed-list');if(!root)return;
+  const visible=activityTimeline.visible({activeThreadIds:activeThreadId?[activeThreadId]:[],expanded:activityExpanded||activityHover});
+  root.replaceChildren();
+  const feed=$('activity-feed');
+  feed.hidden=visible.length===0;
+  $('activity-feed-toggle').textContent=activityExpanded?'▾':'▴';
+  $('activity-feed-toggle').setAttribute('aria-expanded',String(activityExpanded));
+  for(const event of visible){
+    const row=document.createElement('button');row.type='button';row.className='activity-feed-entry activity-'+event.kind;
+    const name=document.createElement('strong');name.textContent='['+activityThreadName(event.threadId)+']';
+    const message=document.createElement('span');message.textContent=(activityLabels[getLanguage()]||activityLabels.ja)[event.kind]||event.kind;
+    row.append(name,message);
+    if(event.threadId){
+      row.addEventListener('click',async()=>{
+        if(threads.some(t=>t.id===event.threadId))await selectThread(event.threadId);
+        else notify(getLanguage()==='en'?'Switch to the source project to view this chat.':'対象プロジェクトのチャット一覧から開いてください。');
+      });
+    }else row.disabled=true;
+    root.append(row);
+  }
+}
+function initActivityFeed(){
+  const root=$('activity-feed');if(!root)return;
+  root.addEventListener('mouseenter',()=>{activityHover=true;renderActivityFeed();});
+  root.addEventListener('mouseleave',()=>{activityHover=false;renderActivityFeed();});
+  $('activity-feed-toggle').addEventListener('click',()=>{activityExpanded=!activityExpanded;renderActivityFeed();});
+  activityRefreshTimer=setInterval(()=>{if(!activityHover&&!activityExpanded)renderActivityFeed();},1000);
+}
+function recordActivity(event){
+  const change=activityFromCodex(event);
+  if(change&&activityTimeline.record(change))renderActivityFeed();
+}
+
 function onCodex(e){
+  recordActivity(e);
   if(e.type==='approval-request'){
     pendingCodexApprovals.set(e.approval.approvalId,e.approval);
     renderCodexApprovals();
@@ -1342,6 +1395,7 @@ async function boot(){
   await refreshCodexApprovals();
   updateSendPreview();
   updateButtons();
+  initActivityFeed();
   listRefresh=setInterval(refreshThreads,15000);
   usageRefresh=setInterval(refreshUsage,60000);
   statusRefresh=setInterval(refreshStatus,3000);
