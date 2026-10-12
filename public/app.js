@@ -696,6 +696,8 @@ function renderActivityFeed(){
   root.replaceChildren();
   const feed=$('activity-feed');
   feed.hidden=visible.length===0;
+  const shown=new Set(activeThreadId?[activeThreadId]:[]);
+  $('activity-feed-launcher').hidden=visible.length>0||!activityTimeline.entries.some(entry=>!shown.has(entry.threadId));
   $('activity-feed-toggle').textContent=activityExpanded?'▾':'▴';
   $('activity-feed-toggle').setAttribute('aria-expanded',String(activityExpanded));
   for(const event of visible){
@@ -714,6 +716,7 @@ function renderActivityFeed(){
 }
 function initActivityFeed(){
   const root=$('activity-feed');if(!root)return;
+  $('activity-feed-launcher').addEventListener('click',()=>{activityExpanded=true;renderActivityFeed();});
   root.addEventListener('mouseenter',()=>{activityHover=true;renderActivityFeed();});
   root.addEventListener('mouseleave',()=>{activityHover=false;renderActivityFeed();});
   $('activity-feed-toggle').addEventListener('click',()=>{activityExpanded=!activityExpanded;renderActivityFeed();});
