@@ -634,3 +634,9 @@ html[lang="en"] .hotbar-controls button{
 .activity-feed-launcher[hidden]{display:none!important}
 .activity-feed-launcher{position:fixed;bottom:16px;left:16px;z-index:89;border:2px solid #54735a;background:rgba(18,25,23,.80);color:#e7f2df;padding:6px 10px;font:700 11px ui-monospace,Consolas,monospace;cursor:pointer}
 .activity-feed-launcher:focus-visible{outline:2px solid #d9ebc8;outline-offset:2px}
+
+/* Let the additional split toggle wrap below the brand on narrow displays. */
+@media(max-width:820px){
+  .topbar{flex-wrap:wrap}
+  .topbar-actions{margin-left:0;width:100%;justify-content:flex-end}
+}
