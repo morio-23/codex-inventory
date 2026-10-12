@@ -8,20 +8,20 @@ export function activityFromCodex(event) {
   if (event.type === 'approval-resolved' && typeof event.threadId === 'string')
     return {threadId:event.threadId,kind:'approval-resolved',key:'approval:'+event.approvalId};
   if (event.type === 'turn-start' && typeof event.threadId === 'string')
-    return {threadId:event.threadId,kind:'started',key:'start:'+event.turnId};
+    return {threadId:event.threadId,kind:'started',key:'start:'+event.threadId+':'+event.turnId};
   if (event.type === 'connection')
     return {threadId:'',kind:'disconnected',key:'connection',persistent:true};
   if (event.type !== 'codex' || typeof event.threadId !== 'string') return null;
   const p=event.params||{}, id=event.threadId;
-  if (event.method === 'turn/started')return {threadId:id,kind:'started',key:'start:'+p.turn?.id};
+  if (event.method === 'turn/started')return {threadId:id,kind:'started',key:'start:'+id+':'+p.turn?.id};
   if (event.method === 'turn/completed') {
     const kind=STATUS.has(p.turn?.status)?p.turn.status:'completed';
-    return {threadId:id,kind,key:'finish:'+p.turn?.id};
+    return {threadId:id,kind,key:'finish:'+id+':'+p.turn?.id};
   }
   if(event.method==='item/started'&&p.item?.type==='commandExecution')
-    return {threadId:id,kind:'command',key:'command:'+p.item.id};
+    return {threadId:id,kind:'command',key:'command:'+id+':'+p.item.id};
   if(event.method==='item/completed'&&p.item?.type==='fileChange')
-    return {threadId:id,kind:'files',key:'files:'+p.item.id};
+    return {threadId:id,kind:'files',key:'files:'+id+':'+p.item.id};
   return null;
 }
 export class ActivityTimeline {
