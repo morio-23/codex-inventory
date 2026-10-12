@@ -1,4 +1,5 @@
 import { renderMarkdown } from './markdown.js';
+import { SplitPane } from './split-pane.js';
 import {categories,initialState,loadState,saveState,mergedTemplates,variablesOf,validateTemplate,parseTemplateImport,exportTemplateJson} from './inventory-state.js';
 import {setupLanguage,getLanguage,getLocale,t,translateDom} from './i18n.js';
 import englishTemplates from './templates.en.js';
@@ -31,6 +32,7 @@ const $ = id => document.getElementById(id);
 const threadList = $('thread-list');
 const tooltip = $('tooltip');
 const logs = new Map();
+let splitPane=null;
 // Keep intentionally expanded commands open when streaming redraws the log.
 const expandedCommands = new Set();
 const completedTurnKeys=new Set();
@@ -138,11 +140,13 @@ function paintResetTicketState(data){
 const stamp = () => new Date().toLocaleTimeString(getLocale(),{hour12:false});
 const safe = value => String(value ?? '');
 
-async function api(path, options={}) {
+async function api(path, options={}, context=null) {
+  const requestedWorkspace=context?.workspace??workspacePath;
   const response=await fetch(path,{...options,headers:{
     // Fetch request headers are restricted to ByteString (Latin-1). Encode
     // Unicode paths as ASCII and decode only on the server before matching.
-    ...options.headers,...(workspacePath?{'X-Codex-Workspace':encodeURIComponent(workspacePath)}:{})
+    ...options.headers,...(requestedWorkspace?{'X-Codex-Workspace':encodeURIComponent(requestedWorkspace)}:{}),
+    ...(context?.explicit?{'X-Codex-Workspace-Mode':'explicit'}:{})
   }});
   let result;
   try {result=await response.json();}catch{throw Error('サーバー応答が読み取れません');}
@@ -225,6 +229,7 @@ async function refreshModelOptions(){
   }finally{
     $('model-refresh').disabled=false;
     fillModelChoices({restore:true});
+    splitPane?.fillModels(true);
     if(errorMessage)$('model-hint').textContent=getLanguage()==='en'?'Model fetch failed: '+errorMessage+'. Codex defaults will be used.':'モデル取得失敗: '+errorMessage+'。Codexの設定を継承します。';
   }
 }
@@ -419,7 +424,7 @@ async function selectThread(id){
   $('prompt').value=draftPrompts.get(id)||'';
   $('prompt').dataset.suggested='no';
   updateSendPreview();
-  drawThreads();drawLog();updateButtons();
+  drawThreads();drawLog();updateButtons();splitPane?.updateButtons();
   if(!id)return;
   refreshUsage();
   try{
@@ -454,6 +459,7 @@ async function refreshThreads(){
     threads=result.threads||[];
     needsThreadRefresh=false;
     drawThreads();updateButtons();
+    void splitPane?.refreshThreads();
     if(!activeThreadId && threads.length){
       let savedId=null;
       if(workspacePath)try{savedId=localStorage.getItem(activeThreadStorageKey());}catch{}
@@ -486,6 +492,7 @@ function appendMessage(id,role,text,{itemId=null,pending=false}={}){
   else{entry={role,text,itemId,pending};messages.push(entry);}
   logs.set(id,messages);
   if(id===activeThreadId)drawLog();
+  if(id===splitPane?.threadId)splitPane.renderLog();
   return entry;
 }
 function drawLog(){
@@ -653,17 +660,24 @@ function renderCodexApprovals(){
     }
     card.append(heading,details,hint,actions);list.append(card);
   }
+  splitPane?.renderApprovals();
 }
 async function refreshCodexApprovals(){
-  if(!workspacePath)return;
   const current=workspacePath;
+  const secondary=splitPane?.enabled?splitPane.workspace:null;
+  if(!current&&!secondary)return;
   try{
-    const result=await api('/api/approvals');
-    if(current!==workspacePath)return;
+    const tasks=[];
+    if(current)tasks.push(api('/api/approvals'));
+    if(secondary&&!sameWorkspaceUi(current,secondary))
+      tasks.push(api('/api/approvals',{}, {workspace:secondary,explicit:true}));
+    const results=await Promise.all(tasks);
+    if(current!==workspacePath || secondary!==(splitPane?.enabled?splitPane.workspace:null))return;
     pendingCodexApprovals.clear();
-    for(const a of result.approvals||[])pendingCodexApprovals.set(a.approvalId,a);
+    for(const result of results)for(const approval of result.approvals||[])
+      pendingCodexApprovals.set(approval.approvalId,approval);
     renderCodexApprovals();
-  }catch(error){console.warn('approval refresh',error);}
+  }catch(error){console.warn('approval refresh failed');}
 }
 function onCodex(e){
   if(e.type==='approval-request'){
@@ -682,15 +696,15 @@ function onCodex(e){
   }
   if(e.type==='approval-reset'){pendingCodexApprovals.clear();renderCodexApprovals();return;}
   if(e.type==='turn-start'){
-    runningThreads.add(e.threadId);drawThreads();updateButtons();return;
+    runningThreads.add(e.threadId);drawThreads();updateButtons();splitPane?.updateButtons();return;
   }
-  if(e.type==='connection'){runningThreads.clear();connected=false;updateButtons();$('connection').textContent='APP SERVER OFFLINE';document.querySelector('.lamp').classList.remove('ok');notify(e.error,true);return;}
+  if(e.type==='connection'){runningThreads.clear();connected=false;updateButtons();splitPane?.updateButtons();$('connection').textContent='APP SERVER OFFLINE';document.querySelector('.lamp').classList.remove('ok');notify(e.error,true);return;}
   if(e.type==='warning'){notify(e.text,true);return;}
   if(e.type!=='codex')return;
   const {method,threadId:id,params:p}=e;
   if(method==='account/rateLimits/updated'){refreshUsage();return;}
   if(!id)return;
-  if(method==='turn/started'){runningThreads.add(id);updateButtons();drawThreads();}
+  if(method==='turn/started'){runningThreads.add(id);updateButtons();drawThreads();splitPane?.updateButtons();}
   if(method==='item/agentMessage/delta'){
     const itemId=p.itemId||p.item?.id||'stream-'+(p.turnId||id);
     const messages=logs.get(id)||[];
@@ -704,7 +718,7 @@ function onCodex(e){
     if(item.type==='fileChange')appendMessage(id,'files',(item.changes||[]).map(c=>c.path||c.kind).join('\n'),{itemId:item.id});
   }
   if(method==='turn/completed'){
-    runningThreads.delete(id);updateButtons();drawThreads();
+    runningThreads.delete(id);updateButtons();drawThreads();splitPane?.updateButtons();
     if(p.turn?.status==='failed')notify('Codexの実行に失敗しました: '+(p.turn?.error?.message||'不明なエラー'),true);
     notifyTurnCompleted(id,p.turn);
     refreshThreads();refreshUsage();
@@ -1289,7 +1303,7 @@ async function boot(){
       $('template-description-edit').value=currentDescription;
       paintTemplateVariables();
     }
-    paintProjectPicker();fillModelChoices();updateButtons();drawThreads();updateSendPreview();translateDom();
+    paintProjectPicker();fillModelChoices();splitPane?.fillModels(true);updateButtons();drawThreads();updateSendPreview();translateDom();
     window.codexInventory?.setLanguage?.(getLanguage())?.catch(()=>{});
     void refreshUsage().catch(()=>{});
   }});
@@ -1300,6 +1314,19 @@ async function boot(){
   initCompletionNotifications();
   initProjectPicker();
   initModelControls();
+  splitPane=new SplitPane({
+    api,post,notify,getLanguage,getLocale,
+    getCatalog:()=>modelCatalog,
+    getPrimaryThreadId:()=>activeThreadId,
+    getRunning:()=>runningThreads,
+    getMessages:id=>logs.get(id)||[],
+    setMessages:(id,data)=>{logs.set(id,data);if(id===activeThreadId)drawLog();},
+    appendMessage,renderMarkdown,
+    getApprovals:()=>[...pendingCodexApprovals.values()],
+    afterApproval:id=>{pendingCodexApprovals.delete(id);renderCodexApprovals();},
+    refreshApprovals:()=>refreshCodexApprovals(),
+    onSharedStatus:()=>{drawThreads();updateButtons();}
+  });
   buildInventory();
   await setupLocalItems();
   await setupPromptTemplates();

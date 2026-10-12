@@ -21,6 +21,7 @@ const assets=new Map([
   ['/',['public/index.html','text/html; charset=utf-8']],
   ['/styles.css',['public/styles.css','text/css; charset=utf-8']],
   ['/app.js',['public/app.js','text/javascript; charset=utf-8']],
+  ['/split-pane.js',['public/split-pane.js','text/javascript; charset=utf-8']],
   ['/markdown.js',['public/markdown.js','text/javascript; charset=utf-8']],
   ['/inventory-state.js',['public/inventory-state.js','text/javascript; charset=utf-8']],
   ['/i18n.js',['public/i18n.js','text/javascript; charset=utf-8']],
