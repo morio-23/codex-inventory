@@ -22,6 +22,7 @@ const assets=new Map([
   ['/styles.css',['public/styles.css','text/css; charset=utf-8']],
   ['/app.js',['public/app.js','text/javascript; charset=utf-8']],
   ['/split-pane.js',['public/split-pane.js','text/javascript; charset=utf-8']],
+  ['/activity-feed-state.js',['public/activity-feed-state.js','text/javascript; charset=utf-8']],
   ['/markdown.js',['public/markdown.js','text/javascript; charset=utf-8']],
   ['/inventory-state.js',['public/inventory-state.js','text/javascript; charset=utf-8']],
   ['/i18n.js',['public/i18n.js','text/javascript; charset=utf-8']],
@@ -91,6 +92,7 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
         const ping=setInterval(()=>{if(!res.destroyed)res.write(': ping\n\n');},20000);ping.unref?.();
         req.on('close',()=>{clearInterval(ping);listeners.delete(res);});return;
       }
+      if(req.method==='GET'&&path==='/api/activity-state')return json(res,200,{runningThreadIds:[...service.running.keys()]});
       if(req.method==='GET'&&path==='/api/status'){
         try{
           await service.start();
