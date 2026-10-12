@@ -592,7 +592,12 @@ function notifyTurnCompleted(threadId,turn){
   completedTurnKeys.add(key);
   if(completedTurnKeys.size>150)completedTurnKeys.delete(completedTurnKeys.values().next().value);
   const status=['completed','failed','interrupted'].includes(turn.status)?turn.status:'completed';
-  const content=showCompletionToast(threadId,status);
+  // A different chat must not overwrite a visible completion toast for the active chat.
+  // Its completion is already visible in the non-active thread timeline.
+  const content=threadId===activeThreadId?showCompletionToast(threadId,status):{
+    title:status==='failed'?'Codex failed':status==='interrupted'?'Codex interrupted':'Codex completed',
+    body:'View results in Codex Inventory.'
+  };
   if(typeof window.codexInventory?.notifyTurnComplete==='function'){
     // Desktop uses native Windows notifications, even while minimized.
     // Do not include project paths, user prompts, or command output.
@@ -714,6 +719,7 @@ function initActivityFeed(){
 }
 function recordActivity(event){
   const change=activityFromCodex(event);
+  if(event.type==='approval-reset') {activityTimeline.clearApprovals();renderActivityFeed();return;}
   if(change&&activityTimeline.record(change))renderActivityFeed();
 }
 
@@ -764,12 +770,26 @@ function onCodex(e){
   }
   if(method==='thread/tokenUsage/updated')refreshUsage();
 }
+async function refreshRuntimeActivity(){
+  try{
+    const result=await api('/api/activity-state');
+    if(!Array.isArray(result.runningThreadIds))return;
+    runningThreads.clear();
+    for(const id of result.runningThreadIds)if(typeof id==='string')runningThreads.add(id);
+    drawThreads();updateButtons();
+  }catch(error){console.warn('runtime activity refresh failed');}
+}
 function connectEvents(){
   if(eventStream)eventStream.close();
   eventStream=new EventSource('/api/events');
   eventStream.onmessage=ev=>{try{onCodex(JSON.parse(ev.data));}catch(e){console.warn('event',e);}};
   eventStream.onerror=()=>notify('更新イベントを再接続しています…',true);
-  eventStream.onopen=()=>{refreshCodexApprovals();if(activeThreadId){const id=activeThreadId;activeThreadId=null;selectThread(id);}refreshThreads();};
+  eventStream.onopen=()=>{
+    activityTimeline.clearConnection();renderActivityFeed();
+    void refreshRuntimeActivity();refreshCodexApprovals();
+    if(activeThreadId){const id=activeThreadId;activeThreadId=null;selectThread(id);}
+    refreshThreads();
+  };
 }
 function formatReset(unix){return typeof unix==='number'?new Date(unix*1000).toLocaleString(getLocale()):t('未取得');}
 function quotaWindowLabel(quota,fallback){
