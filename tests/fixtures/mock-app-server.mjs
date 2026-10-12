@@ -21,18 +21,22 @@ const success=(id,result)=>write({id,result});
 const fail=(id,message,code=-32600)=>write({id,error:{code,message}});
 const event=(method,params)=>write({method,params});
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
-let active=new Map();
-let pendingApproval=null;
+let active=new Map([...threads.values()].flatMap(thread=>{
+  const turn=thread.turns?.at(-1);
+  return turn?.status==='inProgress'?[[thread.id,{turn}]]:[];
+}));
+const pendingApprovals=new Map();
 function compact(t){return {id:t.id,preview:t.preview||'',cwd:t.cwd,createdAt:t.createdAt,updatedAt:t.updatedAt,turns:t.turns,status:{type:active.has(t.id)?'active':'idle'}};}
-async function handle({id,method,params={}}){
-  if(method===undefined && id!==undefined && pendingApproval && id===pendingApproval.id){
-    const p=pendingApproval;pendingApproval=null;
-    p.resolve(arguments[0]?.result);
+async function handle(packet){
+  const {id,method,params={}}=packet;
+  if(method===undefined && id!==undefined && pendingApprovals.has(id)){
+    const resolve=pendingApprovals.get(id);pendingApprovals.delete(id);
+    resolve(packet.result);
     return;
   }
   if(hangs.has(method))return;
   if(faults.has(method))return fail(id,`Mock failure: ${method}`);
-  if(method===process.env.MOCK_DISCONNECT_METHOD){
+  if(process.env.MOCK_DISCONNECT_METHOD&&method===process.env.MOCK_DISCONNECT_METHOD){
     const marker=process.env.MOCK_DISCONNECT_MARKER;
     if(!marker||!existsSync(marker)){if(marker)writeFileSync(marker,'1');process.exit(7);}
   }
@@ -120,7 +124,7 @@ async function handle({id,method,params={}}){
         approvalKind==='permissions'?'item/permissions/requestApproval':'item/commandExecution/requestApproval';
       const approvalResult=await new Promise(resolve=>{
         const requestId=90000+nextId;
-        pendingApproval={resolve,id:requestId};
+        pendingApprovals.set(requestId,resolve);
         const requested={threadId:t.id,turnId:turn.id,itemId:'approve-'+nextId,
           reason:'Approval integration test'};
         if(approvalKind==='file')requested.grantRoot=t.cwd;
@@ -129,6 +133,7 @@ async function handle({id,method,params={}}){
           requested.permissions={network:{enabled:true},fileSystem:null};
         }else{requested.command='echo APPROVAL_TEST';requested.cwd=t.cwd;}
         write({id:requestId,method,params:requested});
+        if(process.env.MOCK_DUP_APPROVAL_ID==='1')write({id:requestId,method,params:requested});
       });
       const allowed=approvalKind==='permissions'
         ? approvalResult?.permissions?.network?.enabled===true

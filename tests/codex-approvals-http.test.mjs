@@ -82,10 +82,16 @@ test('explicit approval is bound to its own workspace and never follows active-p
   const approval=await requested;
   const pending=await fetch(url+'/api/approvals',{headers:headers(beta)});
   assert.equal((await pending.json()).approvals[0].approvalId,approval.approvalId);
-  const reply=(cwd,decision)=>fetch(url+'/api/approvals/'+approval.approvalId+'/respond',{
+  const reply=(cwd,decision,threadId=approval.threadId,turnId=approval.turnId)=>fetch(url+'/api/approvals/'+approval.approvalId+'/respond',{
     method:'POST',headers:{...headers(cwd),Origin:url,'Content-Type':'application/json'},
-    body:JSON.stringify({decision})
+    body:JSON.stringify({decision,threadId,turnId})
   });
+  assert.equal((await fetch(url+'/api/approvals/'+approval.approvalId+'/respond',{
+    method:'POST',headers:{...headers(beta),Origin:url,'Content-Type':'application/json'},
+    body:JSON.stringify({decision:'accept'})
+  })).status,400,'explicit approval requires thread and turn context');
+  assert.equal((await reply(beta,'accept','mock-other-thread',approval.turnId)).status,409);
+  assert.equal((await reply(beta,'accept',approval.threadId,'other-turn')).status,409);
   assert.equal((await reply(alpha,'accept')).status,409,'cannot approve via another workspace');
   assert.equal((await reply(beta,'accept')).status,200,'owning workspace can explicitly approve');
   assert.equal((await reply(beta,'accept')).status,409,'one-shot approval cannot be replayed');

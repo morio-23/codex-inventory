@@ -1,9 +1,9 @@
 // Independent secondary view for concurrent Codex work. No sensitive data is persisted in Git.
 export class SplitPane {
-  constructor({api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,getRunning,
+  constructor({api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,getRunning,getTurnId,setTurnId,
     getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus}) {
     Object.assign(this,{api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,
-      getRunning,getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus});
+      getRunning,getTurnId,setTurnId,getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus});
     this.root=document.getElementById('secondary-pane');
     this.wrap=document.getElementById('quest-panes');
     this.layout=document.querySelector('.app-layout');
@@ -178,9 +178,10 @@ export class SplitPane {
     const optimistic=this.appendMessage(id,'user',prompt);
     const scoped={workspace:cwd,explicit:true};
     try{
-      await this.api('/api/threads/'+encodeURIComponent(id)+'/turn',this.post({
+      const started=await this.api('/api/threads/'+encodeURIComponent(id)+'/turn',this.post({
         prompt,action,editing,model:this.model.value||null,effort:this.effort.value||null
       }),scoped);
+      this.setTurnId(id,started.turnId);
       this.drafts.set(id,'');
       if(this.threadId===id&&this.prompt.value.trim()===prompt)this.prompt.value='';
       this.notify('分割チャットで実行を開始しました');
@@ -194,8 +195,10 @@ export class SplitPane {
   async stop(){
     const id=this.threadId,cwd=this.workspace;
     if(!id||!cwd||!this.getRunning().has(id)||id===this.getPrimaryThreadId())return;
+    const turnId=this.getTurnId(id);
+    if(!turnId){this.notify('停止対象のターンを確認できません。状態を更新して再試行してください',true);return;}
     try{
-      await this.api('/api/threads/'+encodeURIComponent(id)+'/interrupt',this.post({}),{workspace:cwd,explicit:true});
+      await this.api('/api/threads/'+encodeURIComponent(id)+'/interrupt',this.post({turnId}),{workspace:cwd,explicit:true});
       this.notify('対象チャットに中断を要求しました');
     }catch(error){this.notify('中断失敗: '+error.message,true);}
   }
@@ -237,7 +240,8 @@ export class SplitPane {
           for(const b of actions.querySelectorAll('button'))b.disabled=true;
           try{
             await this.api('/api/approvals/'+encodeURIComponent(request.approvalId)+'/respond',
-              this.post({decision}),{workspace:this.workspace,explicit:true});
+              this.post({decision,threadId:request.threadId,turnId:request.turnId}),
+              {workspace:this.workspace,explicit:true});
             this.afterApproval(request.approvalId);
           }catch(error){this.notify('承認応答に失敗: '+error.message,true);
             for(const b of actions.querySelectorAll('button'))b.disabled=false;}

@@ -8,6 +8,7 @@ export class AppServerClient extends EventEmitter {
     super();
     Object.assign(this, {command, args, cwd, env, spawnProcess, timeoutMs});
     this.nextId = 1;
+    this.generation = 0;
     this.pending = new Map();
     this.serverRequests = new Map();
     this.child = null;
@@ -22,15 +23,18 @@ export class AppServerClient extends EventEmitter {
   }
   async #launch() {
     this.closed = false;
+    const generation=++this.generation;
     let child;
     try { child = this.spawnProcess(this.command, this.args, {cwd:this.cwd, env:this.env, stdio:['pipe','pipe','pipe'], windowsHide:true, shell:process.platform==='win32' && /^(codex|codex\.(?:cmd|bat))$/i.test(this.command)}); }
     catch (e) { throw new Error(`Codex App Serverを起動できません: ${e.message}`); }
     this.child = child;
-    child.stdin?.on('error',error => this.#disconnect(error));
-    child.on('error', error => this.#disconnect(new Error(`codex起動エラー: ${error.message}`)));
-    child.on('exit', (code, signal) => this.#disconnect(new Error(`Codex App Serverが終了しました (${code ?? signal})`)));
+    child.stdin?.on('error',error => this.#disconnect(error,generation));
+    child.on('error', error => this.#disconnect(new Error(`codex起動エラー: ${error.message}`),generation));
+    child.on('exit', (code, signal) => this.#disconnect(new Error(`Codex App Serverが終了しました (${code ?? signal})`),generation));
     child.stderr?.on('data', chunk => { this.stderrTail = (this.stderrTail + chunk.toString()).slice(-2000); });
-    createInterface({input:child.stdout}).on('line', line => this.#receive(line));
+    createInterface({input:child.stdout}).on('line', line => {
+      if(generation===this.generation&&!this.closed)this.#receive(line);
+    });
     const result = await this.request('initialize', {clientInfo:{name:'codex_inventory',title:'Codex Inventory',version:'0.6.0'},capabilities:{experimentalApi:false}}, {skipReady:true});
     this.notify('initialized', {});
     this.emit('ready', result);
@@ -70,6 +74,10 @@ export class AppServerClient extends EventEmitter {
       else pending.resolve(packet.result);
     } else if (packet.method && packet.id !== undefined) {
       const methods = new Set(['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/permissions/requestApproval']);
+      if(methods.has(packet.method)&&this.serverRequests.has(packet.id)){
+        this.emit('warning','重複するApp Server承認要求IDを無視しました');
+        return;
+      }
       if(methods.has(packet.method) && this.listenerCount('server-request')>0 && this.serverRequests.size<32){
         // Hold this JSON-RPC response until the user decides in Inventory.
         this.serverRequests.set(packet.id,packet.method);
@@ -86,8 +94,8 @@ export class AppServerClient extends EventEmitter {
       this.emit('warning',`サーバーからの確認要求を拒否しました: ${packet.method}`);
     } else if (packet.method) this.emit('notification',{method:packet.method,params:packet.params||{}});
   }
-  #disconnect(error) {
-    if (this.closed) return;
+  #disconnect(error,generation=this.generation) {
+    if (this.closed||generation!==this.generation) return;
     this.closed=true;
     for (const p of this.pending.values()) {clearTimeout(p.timer);p.reject(error);}
     this.pending.clear();
