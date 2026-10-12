@@ -154,6 +154,25 @@ export class CodexService extends EventEmitter {
     this.emit('event',{type:'project',workspace:this.workspace});
     return {workspace:this.workspace};
   }
+  /** Explicit request context validated independently of the project picker. */
+  async validateWorkspace(cwd){
+    if(typeof cwd!=='string'||!cwd||cwd.length>4096)
+      throw Object.assign(new Error('プロジェクト指定の形式が不正です'),{status:400});
+    if(!this.autoDiscover){
+      if(!sameWorkspace(cwd,this.workspace))throw Object.assign(new Error('固定ワークスペース以外を指定できません'),{status:403});
+      return this.workspace;
+    }
+    const {projects}=await this.discoverProjects({force:true});
+    const match=projects.find(item=>item.exists&&sameWorkspace(item.cwd,cwd));
+    if(!match)throw Object.assign(new Error('登録または検出済みのプロジェクトを指定してください'),{status:403});
+    try{
+      const canonical=await realpath(match.cwd),info=await stat(canonical);
+      if(!info.isDirectory()||canonical!==match.canonicalPath)throw Error('invalid workspace');
+    }catch{
+      throw Object.assign(new Error('選択プロジェクトが変更・削除されています'),{status:409});
+    }
+    return match.cwd;
+  }
   async readThread(id) {
     let response;
     try {response=await this.client.request('thread/read',{threadId:id,includeTurns:true},{timeoutMs:60000});}
@@ -184,12 +203,12 @@ export class CodexService extends EventEmitter {
     if((model===null||model==='')&&(effort===null||effort===''))return {};
     return resolveModelSelection(await this.listModels(),{model,effort});
   }
-  async createThread({editing=false,model=null,effort=null}={}) {
-    const cwd=this.workspace;
+  async createThread({editing=false,model=null,effort=null,workspace=null}={}) {
+    const cwd=workspace?await this.validateWorkspace(workspace):this.workspace;
     if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409});
     const selected=await this.selectedModel({model,effort});
     const preferred=selected.model||((await this.listModels().catch(()=>null))?.defaultModel);
-    if(!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。再度新規作成してください'),{status:409});
+    if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。再度新規作成してください'),{status:409});
     const result=await this.client.request('thread/start',{cwd,approvalPolicy:'on-request',sandbox:editing?'workspace-write':'read-only',ephemeral:false,...(preferred?{model:preferred}:{})});
     const thread={...simplifyThread(result.thread),cwd:result.thread?.cwd||cwd};this.subscribed.add(thread.id);this.knownThreads.set(thread.id,thread);
     this.emit('event',{type:'thread',threadId:thread.id,thread});
@@ -201,9 +220,9 @@ export class CodexService extends EventEmitter {
     await this.client.request('thread/resume',{threadId},{timeoutMs:60000});
     this.subscribed.add(threadId);
   }
-  async startTurn({threadId,prompt,action='quest',editing=false,model=null,effort=null}) {
-    if(!this.workspace)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409});
-    const cwd=this.workspace;
+  async startTurn({threadId,prompt,action='quest',editing=false,model=null,effort=null,workspace=null}) {
+    const cwd=workspace?await this.validateWorkspace(workspace):this.workspace;
+    if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409});
     if(!threadId||typeof prompt!=='string'||!prompt.trim()||prompt.length>10000||!Object.hasOwn(taskInstructions,action)) throw new Error('任務の内容が不正です');
     if((action==='fix'||action==='build')&&!editing)throw new Error('実装・修正には編集許可が必要です');
     if(this.running.has(threadId))throw new Error('このスレッドは実行中です');
@@ -213,7 +232,7 @@ export class CodexService extends EventEmitter {
       if(!sameWorkspace(record.thread?.cwd,cwd)) throw Object.assign(new Error('別プロジェクトのチャットです。画面で所属プロジェクトを選択してください。'),{status:409});
       const selection=await this.selectedModel({model,effort});
       await this.ensureSubscribed(threadId);
-      if(!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409});
+      if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409});
       const text=action==='quest'?prompt.trim():`${taskInstructions[action]}\n\n【ユーザー依頼】\n${prompt.trim()}`;
       const input=[{type:'text',text}];
       const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',sandboxPolicy:editing?{type:'workspaceWrite',writableRoots:[cwd],networkAccess:false}:{type:'readOnly'}},{timeoutMs:60000});
@@ -270,7 +289,7 @@ export class CodexService extends EventEmitter {
   listApprovals(workspace=null){
     return {approvals:[...this.approvals.values()].filter(e=>!workspace||sameWorkspace(e.workspace,workspace)).map(e=>e.public)};
   }
-  respondApproval({approvalId,decision,workspace}){
+  respondApproval({approvalId,decision,workspace,explicit=false}){
     if(!['accept','acceptForSession','decline','cancel'].includes(decision))
       throw Object.assign(new Error('承認操作が不正です'),{status:400});
     const entry=this.approvals.get(approvalId);
@@ -281,7 +300,7 @@ export class CodexService extends EventEmitter {
       this.emit('event',{type:'approval-resolved',approvalId,threadId:entry.threadId,decision:'decline',reason:'timeout'});
       throw Object.assign(new Error('承認要求は期限切れです'),{status:409});
     }
-    if(!sameWorkspace(entry.workspace,workspace)||!sameWorkspace(entry.workspace,this.workspace))
+    if(!sameWorkspace(entry.workspace,workspace)||(!explicit&&!sameWorkspace(entry.workspace,this.workspace)))
       throw Object.assign(new Error('対象プロジェクトが一致しません'),{status:409});
     const runningTurn=this.running.get(entry.threadId);
     if(!runningTurn||runningTurn!=='starting'&&runningTurn!=='started'&&runningTurn!==entry.turnId)
