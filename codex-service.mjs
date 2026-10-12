@@ -268,7 +268,7 @@ export class CodexService extends EventEmitter {
       if(!this.approvals.has(approvalId))return;
       this.approvals.delete(approvalId);
       this.#rejectApprovalRequest(id,method);
-      this.emit('event',{type:'approval-resolved',approvalId,threadId,decision:'decline',reason:'timeout'});
+      this.emit('event',{type:'approval-resolved',approvalId,threadId,turnId,decision:'decline',reason:'timeout'});
     },120_000);
     timer.unref?.();
     const isFile=method==='item/fileChange/requestApproval';
@@ -297,7 +297,7 @@ export class CodexService extends EventEmitter {
     if(Date.now()>=entry.expiresAt){
       this.approvals.delete(approvalId);clearTimeout(entry.timer);
       this.#rejectApprovalRequest(entry.id,entry.method);
-      this.emit('event',{type:'approval-resolved',approvalId,threadId:entry.threadId,decision:'decline',reason:'timeout'});
+      this.emit('event',{type:'approval-resolved',approvalId,threadId:entry.threadId,turnId:entry.turnId,decision:'decline',reason:'timeout'});
       throw Object.assign(new Error('承認要求は期限切れです'),{status:409});
     }
     if(!sameWorkspace(entry.workspace,workspace)||(!explicit&&!sameWorkspace(entry.workspace,this.workspace)))
@@ -319,7 +319,7 @@ export class CodexService extends EventEmitter {
     }else response={decision};
     this.client.respondToServerRequest(entry.id,response);
     this.approvals.delete(approvalId);clearTimeout(entry.timer);
-    this.emit('event',{type:'approval-resolved',approvalId,threadId:entry.threadId,decision});
+    this.emit('event',{type:'approval-resolved',approvalId,threadId:entry.threadId,turnId:entry.turnId,decision});
     return {ok:true,approvalId,decision};
   }
   async interrupt(threadId){
@@ -329,7 +329,7 @@ export class CodexService extends EventEmitter {
       if(entry.threadId!==threadId)continue;
       this.approvals.delete(key);clearTimeout(entry.timer);
       this.#rejectApprovalRequest(entry.id,entry.method)
-      this.emit('event',{type:'approval-resolved',approvalId:key,threadId,decision:'cancel'});
+      this.emit('event',{type:'approval-resolved',approvalId:key,threadId,turnId:entry.turnId,decision:'cancel'});
     }
     await this.client.request('turn/interrupt',{threadId,turnId});
     return {ok:true};
@@ -350,7 +350,7 @@ export class CodexService extends EventEmitter {
       for(const [key,entry] of this.approvals)if(entry.threadId===threadId){
         this.approvals.delete(key);clearTimeout(entry.timer);
         this.#rejectApprovalRequest(entry.id,entry.method)
-        this.emit('event',{type:'approval-resolved',approvalId:key,threadId,decision:'cancel'});
+        this.emit('event',{type:'approval-resolved',approvalId:key,threadId,turnId:entry.turnId,decision:'cancel'});
       }
       this.running.delete(threadId);this.turnWorkspaces.delete(threadId);if(params.turn?.id)this.finishedTurns.add(params.turn.id);}
     const forwarded = ['thread/started','thread/name/updated','thread/status/changed','thread/tokenUsage/updated','turn/started','turn/completed','item/started','item/completed','item/agentMessage/delta','item/commandExecution/outputDelta','turn/plan/updated','turn/diff/updated','account/rateLimits/updated'];

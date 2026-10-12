@@ -247,7 +247,11 @@ test('English approval UI shows explicit safe choices and can decline without au
   try{
     await page.goto(url);
     await expect(page.locator('#new-thread')).toHaveText('+ New chat');
+    await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+    const created=page.waitForResponse(r=>r.url().endsWith('/api/threads')&&r.request().method()==='POST');
     await page.locator('#new-thread').click();
+    const thread=(await (await created).json()).thread.id;
+    await expect(page.locator('#active-thread')).toHaveText('ID: '+thread);
     await runPrompt(page,'Run a harmless test command; request permission first.');
     await expect(page.locator('#codex-approval-panel')).toBeVisible({timeout:15000});
     const panel=page.locator('#codex-approval-panel');
@@ -1336,11 +1340,166 @@ test('split panes keep independent drafts and target the selected thread (@mock)
   await page.locator('#split-toggle').click();
   await expect(page.locator('#secondary-pane')).toBeVisible();
   await expect(page.locator('#secondary-prompt')).toHaveValue('secondary unsent draft');
-  for(const width of [768,1280,1920]){
+  for(const width of [390,768,1280,1920]){
     await page.setViewportSize({width,height:900});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),
       'split UI overflow at '+width).toBeLessThanOrEqual(1);
   }
   expect(diagnostics.consoleErrors).toEqual([]);
   expect(diagnostics.httpErrors).toEqual([]);
+});
+
+test('split chats run in separate discovered workspaces without changing the project picker (@mock)',async({page})=>{
+  box=await seededProjects();
+  const {url}=await box.start({CODEX_WORKSPACE:'',MOCK_TURN_DELAY_MS:'1200'});
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#project-select')).toHaveValue(box.beta);
+  await page.locator('#split-toggle').click();
+  await page.locator('#secondary-thread').selectOption('mock-alpha-auto');
+  await page.locator('#prompt').fill('beta parallel request');
+  await page.locator('#run').click();
+  await page.locator('#secondary-prompt').fill('alpha parallel request');
+  await page.locator('#secondary-send').click();
+  await expect(page.locator('#log')).toContainText('beta parallel request');
+  await expect(page.locator('#secondary-log')).toContainText('alpha parallel request');
+  await expect(page.locator('#project-select')).toHaveValue(box.beta);
+  const history=async id=>(await (await fetch(url+'/api/threads/'+id)).json()).messages||[];
+  await expect.poll(async()=>[(await history('mock-beta-auto')).some(x=>x.role==='assistant'&&x.text.includes('beta parallel request')),
+    (await history('mock-alpha-auto')).some(x=>x.role==='assistant'&&x.text.includes('alpha parallel request'))]).toEqual([true,true]);
+});
+
+test('SSE reconnect reloads a secondary chat that completed while events were unavailable (@mock)',async({page})=>{
+  box=await sandbox();const {url}=await box.start();
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  const first=await createChat(page);
+  const second=await createChat(page);
+  await page.locator('.thread-item[title="'+first+'"]').click();
+  await page.locator('#split-toggle').click();
+  await page.locator('#secondary-thread').selectOption(second);
+  let blocked=0;
+  await page.route('**/api/events',route=>{blocked++;return route.abort();});
+  await box.restart();
+  await expect.poll(()=>blocked).toBeGreaterThan(0);
+  const response=await fetch(url+'/api/threads/'+second+'/turn',{
+    method:'POST',headers:{'Content-Type':'application/json','X-Codex-Workspace':encodeURIComponent(root)},
+    body:JSON.stringify({prompt:'Recovered secondary',action:'quest',editing:false,model:null,effort:null})
+  });
+  expect(response.status).toBe(202);
+  await expect.poll(async()=>{
+    const history=await (await fetch(url+'/api/threads/'+second)).json();
+    return history.messages?.some(message=>message.role==='assistant'&&message.text.includes('Recovered secondary'));
+  }).toBe(true);
+  let resyncs=0;
+  page.on('request',request=>{if(new URL(request.url()).pathname==='/api/activity-state')resyncs++;});
+  await page.unroute('**/api/events');
+  await expect.poll(()=>resyncs).toBeGreaterThan(0);
+  await expect(page.locator('#secondary-log .answer')).toContainText('Recovered secondary',{timeout:15000});
+});
+
+test('a stale secondary history response cannot erase a newer SSE reply (@mock)',async({page})=>{
+  box=await seededProjects();
+  const {url}=await box.start({CODEX_WORKSPACE:''});
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await page.locator('#split-toggle').click();
+  await page.locator('#secondary-thread').selectOption('mock-alpha-auto');
+  await expect(page.locator('#secondary-log')).toContainText('ANSWER_ALPHA');
+  let snapshotTaken,releaseSnapshot;
+  const captured=new Promise(resolve=>{snapshotTaken=resolve;});
+  const gate=new Promise(resolve=>{releaseSnapshot=resolve;});
+  await page.route('**/api/threads/mock-alpha-auto',async route=>{
+    const response=await route.fetch();
+    snapshotTaken();
+    await gate;
+    await route.fulfill({response});
+  });
+  await page.locator('#secondary-reload').click();
+  await captured;
+  const response=await fetch(url+'/api/threads/mock-alpha-auto/turn',{
+    method:'POST',headers:{'Content-Type':'application/json',
+      'X-Codex-Workspace':encodeURIComponent(box.alpha),'X-Codex-Workspace-Mode':'explicit'},
+    body:JSON.stringify({prompt:'newer live reply',action:'quest',editing:false,model:null,effort:null})
+  });
+  expect(response.status).toBe(202);
+  await expect(page.locator('#secondary-status')).toHaveText('実行中');
+  await expect(page.locator('#secondary-status')).toHaveText('待機中');
+  await expect(page.locator('#secondary-log')).toContainText('newer live reply');
+  await page.evaluate(()=>{
+    window.secondaryHistoryPainted=new Promise(resolve=>{
+      const observer=new MutationObserver(()=>{observer.disconnect();resolve();});
+      observer.observe(document.getElementById('secondary-log'),{childList:true});
+    });
+  });
+  releaseSnapshot();
+  await page.evaluate(()=>window.secondaryHistoryPainted);
+  await expect(page.locator('#secondary-log')).toContainText('newer live reply');
+});
+
+test('a stale primary history response cannot erase a newer SSE reply (@mock)',async({page})=>{
+  box=await seededProjects();
+  const {url}=await box.start({CODEX_WORKSPACE:''});
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#log')).toContainText('ANSWER_BETA');
+  let snapshotTaken,releaseSnapshot;
+  const captured=new Promise(resolve=>{snapshotTaken=resolve;});
+  const gate=new Promise(resolve=>{releaseSnapshot=resolve;});
+  await page.route('**/api/threads/mock-beta-auto',async route=>{
+    const response=await route.fetch();
+    snapshotTaken();
+    await gate;
+    await route.fulfill({response});
+  });
+  await page.locator('#clear-log').click();
+  await captured;
+  const response=await fetch(url+'/api/threads/mock-beta-auto/turn',{
+    method:'POST',headers:{'Content-Type':'application/json','X-Codex-Workspace':encodeURIComponent(box.beta)},
+    body:JSON.stringify({prompt:'newer primary reply',action:'quest',editing:false,model:null,effort:null})
+  });
+  expect(response.status).toBe(202);
+  await expect(page.locator('#stop')).toBeEnabled();
+  await expect(page.locator('#stop')).toBeDisabled();
+  await expect(page.locator('#log')).toContainText('newer primary reply');
+  await page.evaluate(()=>{
+    window.primaryHistoryPainted=new Promise(resolve=>{
+      const observer=new MutationObserver(()=>{observer.disconnect();resolve();});
+      observer.observe(document.getElementById('log'),{childList:true});
+    });
+  });
+  releaseSnapshot();
+  await page.evaluate(()=>window.primaryHistoryPainted);
+  await expect(page.locator('#log')).toContainText('newer primary reply');
+});
+
+test('a stale approval list cannot erase an SSE approval request (@mock)',async({page})=>{
+  box=await sandbox();
+  const {url}=await box.start({MOCK_APPROVAL_REQUEST:'1'});
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  const thread=await createChat(page);
+  let snapshotTaken,releaseSnapshot,intercepted=0,fulfilled=0;
+  const captured=new Promise(resolve=>{snapshotTaken=resolve;});
+  const gate=new Promise(resolve=>{releaseSnapshot=resolve;});
+  await page.route('**/api/approvals',async route=>{
+    intercepted++;
+    const response=await route.fetch();
+    snapshotTaken();
+    await gate;
+    await route.fulfill({response});
+    fulfilled++;
+  });
+  await box.restart({MOCK_APPROVAL_REQUEST:'1'});
+  await captured;
+  const response=await fetch(url+'/api/threads/'+thread+'/turn',{
+    method:'POST',headers:{'Content-Type':'application/json','X-Codex-Workspace':encodeURIComponent(root)},
+    body:JSON.stringify({prompt:'synthetic approval race',action:'quest',editing:false,model:null,effort:null})
+  });
+  expect(response.status).toBe(202);
+  await expect(page.locator('#codex-approval-panel')).toBeVisible();
+  releaseSnapshot();
+  await expect.poll(()=>fulfilled).toBeGreaterThan(0);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await expect(page.locator('#codex-approval-panel')).toBeVisible();
 });

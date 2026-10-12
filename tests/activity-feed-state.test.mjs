@@ -31,6 +31,30 @@ test('token stream never creates activity, command bursts merge',()=>{
  t.record({threadId:'demo-A',kind:'command',key:'command:demo-1'},1);
  t.record({threadId:'demo-A',kind:'command',key:'command:demo-2'},2);
  assert.equal(t.entries.length,1);
+ assert.equal(t.record({threadId:'demo-A',kind:'command',key:'command:demo-2'},3000),false);
+});
+
+test('resolved approval stays resolved when its request is replayed',()=>{
+ const t=new ActivityTimeline();
+ const request={threadId:'demo-B',kind:'approval',key:'approval:demo-8',persistent:true};
+ t.record(request,1);
+ t.record({threadId:'demo-B',kind:'approval-resolved',key:request.key},2);
+ assert.equal(t.record(request,3),false);
+ assert.deepEqual(t.entries,[]);
+});
+
+test('a reused approval number belongs to its original thread and turn',()=>{
+ const t=new ActivityTimeline();
+ const request=turnId=>activityFromCodex({type:'approval-request',approval:{
+   approvalId:'1',threadId:'demo-A',turnId
+ }});
+ const resolved=activityFromCodex({type:'approval-resolved',
+   approvalId:'1',threadId:'demo-A',turnId:'turn-1'});
+ t.record(request('turn-1'),1);
+ t.record(resolved,2);
+ assert.equal(t.record(request('turn-1'),3),false);
+ assert.equal(t.record(request('turn-2'),4),true);
+ assert.deepEqual(t.entries.map(entry=>entry.kind),['approval']);
 });
 
 test('approval reset and reconnect clear only targeted persistent messages',()=>{
@@ -40,6 +64,10 @@ test('approval reset and reconnect clear only targeted persistent messages',()=>
  t.record({threadId:'demo-B',kind:'completed',key:'finish:demo-7'},2);
  t.clearApprovals();
  assert.deepEqual(t.entries.map(x=>x.kind),['disconnected','completed']);
+ assert.equal(t.record({threadId:'demo-C',kind:'approval',key:'approval:demo-6',persistent:true},3),true);
+ assert.deepEqual(t.entries.map(x=>x.kind),['disconnected','completed','approval']);
  t.clearConnection();
- assert.deepEqual(t.entries.map(x=>x.kind),['completed']);
+ assert.deepEqual(t.entries.map(x=>x.kind),['completed','approval']);
+ assert.equal(t.record({threadId:'',kind:'disconnected',key:'connection',persistent:true},3),true);
+ assert.deepEqual(t.entries.map(x=>x.kind),['completed','approval','disconnected']);
 });
