@@ -83,7 +83,11 @@
         </div>
       </section>
       <div id="quest-panes" class="quest-panes">
-      <section class="quest-column">
+      <div id="split-mobile-tabs" class="split-mobile-tabs" role="tablist" aria-label="Chat panes / チャット表示" hidden>
+        <button id="split-primary-tab" type="button" role="tab" aria-controls="primary-pane" aria-label="First chat / 左チャット" aria-selected="true" tabindex="0">左チャット</button>
+        <button id="split-secondary-tab" type="button" role="tab" aria-controls="secondary-pane" aria-label="Second chat / 右チャット" aria-selected="false" tabindex="-1">右チャット</button>
+      </div>
+      <section class="quest-column primary-quest" id="primary-pane" role="tabpanel" aria-labelledby="split-primary-tab">
         <div class="quest-header"><div><span class="eyebrow small">YOUR QUEST</span><h2><span class="quest-rune">✣</span> クエストログ</h2></div><span id="mode-badge" class="mode-badge">観察モード</span></div>
         <div class="quest-paper">
           <div id="active-thread" class="active-thread">新規チャット</div><div class="quest-intro"><span>✧</span><p id="quest-lead">アイテムを選び、任務の内容を入力してください。Codexがあなたの開発ワールドを探索します。</p></div>
@@ -115,7 +119,8 @@
         </div>
         <div class="footer-note"><span>▣</span> ローカルで動作 / 操作内容に応じてCodexがファイルやコマンドを扱います</div>
       </section>
-      <section class="quest-column secondary-quest" id="secondary-pane" aria-label="Second Codex chat" hidden>
+      <div id="split-separator" class="split-separator" role="separator" tabindex="0" aria-label="Resize chat panes / チャット幅を変更" aria-orientation="vertical" aria-valuemin="28" aria-valuemax="72" aria-valuenow="50" hidden></div>
+      <section class="quest-column secondary-quest" id="secondary-pane" role="tabpanel" aria-labelledby="split-secondary-tab" aria-label="Second Codex chat" hidden>
         <div class="quest-header"><div><span class="eyebrow small">SECOND QUEST</span><h2>✣ 分割チャット</h2></div><span class="quest-state" id="secondary-status">未選択</span></div>
         <div class="quest-paper split-paper">
           <div class="split-thread-controls"><label for="secondary-thread">別のチャット</label>

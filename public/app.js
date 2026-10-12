@@ -1,6 +1,8 @@
 import { renderMarkdown } from './markdown.js';
 import { SplitPane } from './split-pane.js';
 import { ActivityTimeline, activityFromCodex } from './activity-feed-state.js';
+import { DisplayLabels } from './display-labels.js';
+import { conflictCandidates } from './conflict-warning-state.js';
 import {categories,initialState,loadState,saveState,mergedTemplates,variablesOf,validateTemplate,parseTemplateImport,exportTemplateJson} from './inventory-state.js';
 import {setupLanguage,getLanguage,getLocale,t,translateDom} from './i18n.js';
 import englishTemplates from './templates.en.js';
@@ -33,12 +35,14 @@ const $ = id => document.getElementById(id);
 const threadList = $('thread-list');
 const tooltip = $('tooltip');
 const logs = new Map();
+const displayLabels=new DisplayLabels();
 const activityTimeline=new ActivityTimeline();
 let activityExpanded=false;
 let activityHover=false;
 let activityRefreshTimer=null;
-const activityOrdinals=new Map();
 let splitPane=null;
+let workspaceConflicts=[];
+let runtimeRevision=0;
 // Keep intentionally expanded commands open when streaming redraws the log.
 const expandedCommands = new Set();
 const completedTurnKeys=new Set();
@@ -91,7 +95,7 @@ function allTemplates(){return mergedTemplates(builtinTemplates,inventoryState);
 function catalog(){return [...localItems,...codexItems,...allTemplates().map(item=>({...item,templateCategory:item.category,category:'テンプレート',name:item.title,short:'書',icon:'📚',tip:item.description,costLabel:'選択・編集ではCodex利用枠の消費なし。送信時は消費する可能性があります'}))];}
 function findItem(id){return catalog().find(item=>item.id===id);}
 const itemText=(item,value)=>item.source==='user'?value:t(value);
-function persistInventory(){try{saveState(localStorage,workspacePath,inventoryState);}catch(error){notify('ブラウザ保存に失敗: '+error.message,true);}}
+function persistInventory(){try{saveState(localStorage,workspacePath,inventoryState);}catch(error){notify('ブラウザ保存に失敗しました',true);}}
 function sameWorkspaceUi(a,b) {
   if(!a||!b)return false;
   const isWin=/^[A-Za-z]:[\\/]/;
@@ -180,7 +184,7 @@ function persistModelChoice(){
   if(!workspacePath)return;
   try{localStorage.setItem(modelChoiceKey(),JSON.stringify({
     model:$('model-select').value,effort:$('reasoning-select').value
-  }));}catch(error){notify('モデル設定の保存に失敗: '+error.message,true);}
+  }));}catch(error){notify('モデル設定の保存に失敗しました',true);}
 }
 function turnModelChoice(){
   return {model:$('model-select').value||null,effort:$('reasoning-select').value||null};
@@ -233,12 +237,12 @@ async function refreshModelOptions(){
   }catch(error){
     modelCatalog={models:[],defaultModel:null};
     modelsAvailable=false;
-    errorMessage=error.message;
+    errorMessage=true;
   }finally{
     $('model-refresh').disabled=false;
     fillModelChoices({restore:true});
     splitPane?.fillModels(true);
-    if(errorMessage)$('model-hint').textContent=getLanguage()==='en'?'Model fetch failed: '+errorMessage+'. Codex defaults will be used.':'モデル取得失敗: '+errorMessage+'。Codexの設定を継承します。';
+    if(errorMessage)$('model-hint').textContent=getLanguage()==='en'?'Model fetch failed. Codex defaults will be used.':'モデル取得に失敗しました。Codexの設定を継承します。';
   }
 }
 function initModelControls(){
@@ -426,9 +430,9 @@ async function selectThread(id){
   // A foreign thread can be inspected in "all projects" mode, but must not
   // overwrite the last usable chat selection for the active project.
   if(id&&workspacePath&&sameWorkspaceUi(activeThreadCwd,workspacePath))
-    try{localStorage.setItem(activeThreadStorageKey(),id);}catch(error){notify('選択チャットを保存できません: '+error.message,true);}
+    try{localStorage.setItem(activeThreadStorageKey(),id);}catch(error){notify('選択チャットを保存できません',true);}
   if(isForeignThread())notify('別プロジェクトのチャットは閲覧専用です。プロジェクト選択から所属先に切り替えてください。',true);
-  $('active-thread').textContent=id?'ID: '+id:'新規チャット';
+  $('active-thread').textContent=id?displayLabels.threadLabel(id,getLanguage()):t('新規チャット');
   $('prompt').value=draftPrompts.get(id)||'';
   $('prompt').dataset.suggested='no';
   updateSendPreview();
@@ -455,16 +459,17 @@ async function selectThread(id){
     }
     logs.set(id,history);
     drawLog();
-  }catch(e){notify('履歴取得エラー: '+e.message,true);}
+  }catch(e){notify('履歴を取得できません',true);}
 }
 function drawThreads(){
   threadList.replaceChildren();
   if(!threads.length){const empty=document.createElement('p');empty.className='list-empty';empty.textContent=workspacePath?'このプロジェクトのチャットはありません':'App Server履歴からプロジェクトを選択してください';threadList.append(empty);}
   for(const thread of threads){
     const b=document.createElement('button');b.type='button';b.className='thread-item'+(thread.id===activeThreadId?' chosen':'');
-    const name=document.createElement('span');name.className='thread-name';name.textContent=thread.preview||t('新しいチャット');
+    b.dataset.threadId=thread.id;
+    const name=document.createElement('span');name.className='thread-name';name.textContent=displayLabels.threadLabel(thread.id,getLanguage());
     const meta=document.createElement('small');meta.textContent=(workspacePath&&!sameWorkspaceUi(thread.cwd,workspacePath)?t('別ワールド・閲覧専用')+' · ':'')+(runningThreads.has(thread.id)?(getLanguage()==='en'?'● Running':'● 実行中')+' · ':'')+(thread.updatedAt?new Date(thread.updatedAt*1000).toLocaleString(getLocale()):t('履歴'));
-    b.append(name,meta);b.title=thread.id;b.addEventListener('click',()=>selectThread(thread.id));threadList.append(b);
+    b.append(name,meta);b.title=name.textContent;b.addEventListener('click',()=>selectThread(thread.id));threadList.append(b);
   }
 }
 async function refreshThreads(){
@@ -486,7 +491,7 @@ async function refreshThreads(){
         threads.find(thread=>sameWorkspaceUi(thread.cwd,workspacePath));
       if(ownThread)await selectThread(ownThread.id);
     }
-  }catch(e){needsThreadRefresh=true;notify('チャット一覧: '+e.message,true);}
+  }catch(e){needsThreadRefresh=true;notify('チャット一覧を取得できません',true);}
 }
 async function createThread(choice=turnModelChoice()){
   if(!workspacePath||projectSwitching){notify('先にプロジェクトを選択してください',true);return null;}
@@ -500,7 +505,7 @@ async function createThread(choice=turnModelChoice()){
     notify('新しいCodexスレッドを作成しました');
     await refreshThreads();
     return thread.id;
-  }catch(e){notify('新規作成に失敗: '+e.message,true);return null;}
+  }catch(e){notify('新しいチャットを作成できません',true);return null;}
 }
 function appendMessage(id,role,text,{itemId=null,pending=false}={}){
   const messages=logs.get(id)||[];
@@ -590,7 +595,7 @@ async function run(){
   }catch(e){
     runningThreads.delete(id);updateButtons();drawThreads();
     logs.set(id,(logs.get(id)||[]).filter(entry=>entry!==optimistic));if(activeThreadId===id)drawLog();
-    notify('実行エラー: '+e.message,true);
+    notify('実行を開始できません。対象チャットを確認してください',true);
   }
 }
 function completionNotificationsEnabled(){
@@ -659,8 +664,8 @@ function renderCodexApprovals(){
       ? JSON.stringify(approval.permissions||{},null,2)
       : approval.command||approval.grantRoot||t('対象ファイル・コマンドの詳細は未提供');
     const hint=document.createElement('small');
-    hint.textContent=[approval.reason,approval.networkHost?(getLanguage()==='en'?'Host: ':'接続先: ')+approval.networkHost:null,approval.cwd||approval.workspace,
-      (getLanguage()==='en'?'Thread: ':'対象チャット: ')+approval.threadId].filter(Boolean).join(' · ');
+    hint.textContent=[displayLabels.projectLabel(approval.workspace,getLanguage()),
+      displayLabels.threadLabel(approval.threadId,getLanguage())].join(' · ');
     const actions=document.createElement('div');actions.className='codex-approval-actions';
     for(const [label,decision] of [['今回のみ許可','accept'],['セッション中許可','acceptForSession'],['拒否','decline']]){
       const button=document.createElement('button');button.type='button';
@@ -674,7 +679,7 @@ function renderCodexApprovals(){
           pendingCodexApprovals.delete(approval.approvalId);renderCodexApprovals();
           notify(decision==='decline'?'Codexの要求を拒否しました':'Codexの要求を許可しました');
         }catch(error){
-          notify('許可応答に失敗: '+error.message,true);
+          notify('許可応答に失敗しました。要求を更新して確認してください',true);
           for(const b of actions.querySelectorAll('button'))b.disabled=false;
           await refreshCodexApprovals();
         }
@@ -701,6 +706,14 @@ async function refreshCodexApprovals(){
     pendingCodexApprovals.clear();
     for(const result of results)for(const approval of result.approvals||[])
       pendingCodexApprovals.set(approval.approvalId,approval);
+    const active=[];
+    for(const approval of pendingCodexApprovals.values()){
+      const activity=activityFromCodex({type:'approval-request',approval});
+      if(activity)active.push(activity);
+    }
+    activityTimeline.reconcileApprovals(active.map(item=>item.key));
+    for(const item of active)activityTimeline.record(item);
+    renderActivityFeed();
     renderCodexApprovals();
   }catch(error){console.warn('approval refresh failed');}
 }
@@ -709,33 +722,53 @@ const activityLabels={
   en:{started:'Started',command:'Command running',files:'Files changed',approval:'Approval required',completed:'Completed',failed:'Failed',interrupted:'Interrupted',disconnected:'Disconnected'}
 };
 function activityThreadName(id) {
-  if(!id)return getLanguage()==='en'?'App Server':'App Server';
-  const thread=threads.find(x=>x.id===id);
-  // Previews can be a private user prompt: never put them in the overlay.
-  const cwd=thread?.cwd||'';
-  const name=detectedProjects.find(x=>sameWorkspaceUi(x.cwd,cwd))?.name;
-  if(!activityOrdinals.has(id))activityOrdinals.set(id,activityOrdinals.size+1);
-  const ordinal=activityOrdinals.get(id);
-  const prefix=name&&/^[a-zA-Z0-9_-]{1,32}$/.test(name)?name:(getLanguage()==='en'?'Chat':'チャット');
-  return prefix+' #'+ordinal;
+  return id?displayLabels.threadLabel(id,getLanguage()):'App Server';
+}
+function renderWorkspaceConflicts(){
+  let panel=$('workspace-conflicts');
+  if(!panel){
+    panel=document.createElement('section');panel.id='workspace-conflicts';
+    panel.className='workspace-conflicts';panel.setAttribute('role','status');
+    panel.setAttribute('aria-live','polite');document.body.append(panel);
+  }
+  panel.replaceChildren();
+  const groups=conflictCandidates({workspaceConflicts});
+  panel.hidden=groups.length===0;
+  if(!groups.length)return;
+  const title=document.createElement('strong');
+  title.textContent=getLanguage()==='en'?'⚠ Possible edit overlap':'⚠ 編集の競合候補';
+  panel.append(title);
+  for(const ids of groups){
+    const line=document.createElement('p');
+    line.textContent=ids.map(id=>displayLabels.threadLabel(id,getLanguage())).join(' · ');
+    panel.append(line);
+  }
+  const note=document.createElement('small');
+  note.textContent=getLanguage()==='en'
+    ?'These chats are editing in the same workspace. A file conflict is possible, not confirmed. Running turns continue.'
+    :'同じワークスペースで編集中です。ファイルの競合は未確定です。実行は継続します。';
+  panel.append(note);
 }
 function renderActivityFeed(){
   const root=$('activity-feed-list');if(!root)return;
-  const visible=activityTimeline.visible({activeThreadIds:[activeThreadId,splitPane?.enabled?splitPane.threadId:null].filter(Boolean),expanded:activityExpanded||activityHover});
+  const shown=splitPane?.visibleThreadIds()||[activeThreadId].filter(Boolean);
+  const visible=activityTimeline.visible({activeThreadIds:shown,expanded:activityExpanded});
   root.replaceChildren();
   const feed=$('activity-feed');
   feed.hidden=visible.length===0;
-  const shown=new Set([activeThreadId,splitPane?.enabled?splitPane.threadId:null].filter(Boolean));
-  $('activity-feed-launcher').hidden=visible.length>0||!activityTimeline.entries.some(entry=>!shown.has(entry.threadId));
+  const shownSet=new Set(shown);
+  $('activity-feed-launcher').hidden=visible.length>0||!activityTimeline.entries.some(entry=>!shownSet.has(entry.threadId));
   $('activity-feed-toggle').textContent=activityExpanded?'▾':'▴';
   $('activity-feed-toggle').setAttribute('aria-expanded',String(activityExpanded));
   for(const event of visible){
+    const item=document.createElement('div');item.className='activity-feed-item';
     const row=document.createElement('button');row.type='button';row.className='activity-feed-entry activity-'+event.kind;
     const name=document.createElement('strong');name.textContent='['+activityThreadName(event.threadId)+']';
     const message=document.createElement('span');message.textContent=(activityLabels[getLanguage()]||activityLabels.ja)[event.kind]||event.kind;
     row.append(name,message);
     if(event.threadId){
       row.addEventListener('click',async()=>{
+        if(event.kind==='failed'){activityTimeline.dismiss(event.key);renderActivityFeed();}
         const id=event.threadId;
         if(threads.some(thread=>thread.id===id)){await selectThread(id);return;}
         try{
@@ -753,10 +786,17 @@ function renderActivityFeed(){
             await refreshThreads();
             if(threads.some(thread=>thread.id===id))await selectThread(id);
           }
-        }catch(error){notify('対象チャットを開けません: '+error.message,true);}
+        }catch(error){notify('対象チャットを開けません',true);}
       });
     }else row.disabled=true;
-    root.append(row);
+    item.append(row);
+    if(event.kind==='failed'&&!event.dismissed){
+      const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='activity-dismiss';
+      dismiss.textContent='×';dismiss.setAttribute('aria-label',getLanguage()==='en'?'Dismiss failure notification':'失敗通知を閉じる');
+      dismiss.addEventListener('click',()=>{activityTimeline.dismiss(event.key);renderActivityFeed();});
+      item.append(dismiss);
+    }
+    root.append(item);
   }
 }
 function initActivityFeed(){
@@ -769,18 +809,25 @@ function initActivityFeed(){
 }
 function recordActivity(event){
   const change=activityFromCodex(event);
-  if(event.type==='approval-reset') {activityTimeline.clearApprovals();renderActivityFeed();return;}
-  if(change&&activityTimeline.record(change))renderActivityFeed();
+  if(event.type==='approval-reset') {activityTimeline.clearApprovals();renderActivityFeed();return false;}
+  if(change&&activityTimeline.record(change)){renderActivityFeed();return true;}
+  return false;
 }
 
 
 function onCodex(e){
-  recordActivity(e);
+  const newActivity=recordActivity(e);
+  if(e.type==='activity-state'){
+    runtimeRevision++;
+    applyRuntimeActivity(e);
+    return;
+  }
   if(e.type==='approval-request'){
     approvalRevision++;
     pendingCodexApprovals.set(e.approval.approvalId,e.approval);
     renderCodexApprovals();
-    if(!sameWorkspaceUi(e.approval.workspace,workspacePath))return;
+    if(!newActivity||!sameWorkspaceUi(e.approval.workspace,workspacePath)||
+      (splitPane?.visibleThreadIds()||[activeThreadId]).includes(e.approval.threadId))return;
     if(typeof window.codexInventory?.notifyApprovalNeeded==='function'){
       window.codexInventory.notifyApprovalNeeded().catch(()=>{});
     }else if(typeof window.Notification==='function'&&Notification.permission==='granted'){
@@ -797,8 +844,8 @@ function onCodex(e){
     if(typeof e.turnId==='string')runningTurnIds.set(e.threadId,e.turnId);
     runningThreads.add(e.threadId);drawThreads();updateButtons();splitPane?.updateButtons();return;
   }
-  if(e.type==='connection'){runningThreads.clear();runningTurnIds.clear();connected=false;updateButtons();splitPane?.updateButtons();$('connection').textContent='APP SERVER OFFLINE';document.querySelector('.lamp').classList.remove('ok');notify(e.error,true);return;}
-  if(e.type==='warning'){notify(e.text,true);return;}
+  if(e.type==='connection'){runningThreads.clear();runningTurnIds.clear();workspaceConflicts=[];renderWorkspaceConflicts();connected=false;updateButtons();splitPane?.updateButtons();$('connection').textContent='APP SERVER OFFLINE';document.querySelector('.lamp').classList.remove('ok');notify('App Serverとの接続が切断されました',true);return;}
+  if(e.type==='warning'){notify('App Serverから警告を受信しました。対象チャットを確認してください',true);return;}
   if(e.type!=='codex')return;
   const {method,threadId:id,params:p}=e;
   if(method==='account/rateLimits/updated'){refreshUsage();return;}
@@ -819,23 +866,28 @@ function onCodex(e){
   if(method==='turn/completed'){
     if(runningTurnIds.get(id)===p.turn?.id)runningTurnIds.delete(id);
     runningThreads.delete(id);updateButtons();drawThreads();splitPane?.updateButtons();
-    if(p.turn?.status==='failed')notify('Codexの実行に失敗しました: '+(p.turn?.error?.message||'不明なエラー'),true);
+    if(p.turn?.status==='failed')notify('Codexの実行に失敗しました。対象チャットの実行ログを確認してください',true);
     notifyTurnCompleted(id,p.turn);
     refreshThreads();refreshUsage();
   }
   if(method==='thread/tokenUsage/updated')refreshUsage();
 }
 async function refreshRuntimeActivity(){
+  const revision=runtimeRevision;
   try{
     const result=await api('/api/activity-state');
-    if(!Array.isArray(result.runningThreadIds))return;
-    runningThreads.clear();
-    runningTurnIds.clear();
-    for(const id of result.runningThreadIds)if(typeof id==='string')runningThreads.add(id);
-    for(const row of result.runningTurns||[])
-      if(runningThreads.has(row.threadId)&&typeof row.turnId==='string')runningTurnIds.set(row.threadId,row.turnId);
-    drawThreads();updateButtons();splitPane?.updateButtons();
+    if(revision===runtimeRevision)applyRuntimeActivity(result);
   }catch(error){console.warn('runtime activity refresh failed');}
+}
+function applyRuntimeActivity(result){
+  if(!Array.isArray(result.runningThreadIds))return;
+  runningThreads.clear();runningTurnIds.clear();
+  for(const id of result.runningThreadIds)if(typeof id==='string')runningThreads.add(id);
+  for(const row of result.runningTurns||[])
+    if(runningThreads.has(row.threadId)&&typeof row.turnId==='string')runningTurnIds.set(row.threadId,row.turnId);
+  workspaceConflicts=Array.isArray(result.workspaceConflicts)?result.workspaceConflicts:[];
+  renderWorkspaceConflicts();
+  drawThreads();updateButtons();splitPane?.updateButtons();
 }
 
 function connectEvents(){
@@ -883,12 +935,12 @@ async function refreshUsage(){
     const p=data.primary,s=data.secondary;
     paintQuota($('quota-primary'),quotaWindowLabel(p,'短期利用枠'),p);
     paintQuota($('quota-secondary'),quotaWindowLabel(s,'長期利用枠'),s);
-    $('quota-note').textContent=data.error?'利用量取得失敗: '+data.error:'利用枠はCodexのアカウント情報から取得';
+    $('quota-note').textContent=t(data.error?'利用量を取得できません':'利用枠はCodexのアカウント情報から取得');
     paintResetTicketState(data);
     const record=data.sessionTokens?.find(t=>t.threadId===activeThreadId);
     const tokens=record?.usage?.total?.totalTokens ?? record?.usage?.totalTokens ?? null;
     $('usage').textContent=tokens===null?'TOKEN数 未取得':tokens.toLocaleString()+' TOKENS';
-  }catch(e){needsUsageRefresh=true;paintQuota($('quota-primary'),'短期利用枠',null);paintQuota($('quota-secondary'),'長期利用枠',null);$('usage').textContent='TOKEN数 未取得';$('quota-note').textContent='取得できません: '+e.message;paintResetTicketState(null);}
+  }catch(e){needsUsageRefresh=true;paintQuota($('quota-primary'),'短期利用枠',null);paintQuota($('quota-secondary'),'長期利用枠',null);$('usage').textContent=t('TOKEN数 未取得');$('quota-note').textContent=t('利用量を取得できません');paintResetTicketState(null);}
 }
 /** The selected project controls chat, item storage and all local tool routes. */
 function setCurrentWorkspace(value){
@@ -904,7 +956,7 @@ function setCurrentWorkspace(value){
   $('local-attach').checked=false;
   currentResult=null;
   $('local-results').hidden=true;
-  $('workspace').textContent=next||'App Serverにプロジェクト履歴がありません';
+  $('workspace').textContent=next?displayLabels.projectLabel(next,getLanguage()):'App Serverにプロジェクト履歴がありません';
   inventoryState=next?loadState(localStorage,next,builtinTemplates):initialState();
   selected=findItem(selected.id)||codexItems[0];
   renderCatalog();renderHotbar();paintTemplateList();chooseItem(selected);
@@ -923,8 +975,8 @@ function paintProjectPicker(){
   }else{
     for(const project of detectedProjects){
       const option=document.createElement('option');option.value=project.cwd;
-      option.textContent=project.name+' · '+project.threadCount+(getLanguage()==='en'?' chats':'件')+(project.exists?'':getLanguage()==='en'?' (folder missing)':'（フォルダーなし）');
-      option.title=project.cwd;option.disabled=!project.exists;
+      option.textContent=displayLabels.projectLabel(project.cwd,getLanguage())+' · '+project.threadCount+(getLanguage()==='en'?' chats':'件')+(project.exists?'':getLanguage()==='en'?' (folder missing)':'（フォルダーなし）');
+      option.title=displayLabels.projectLabel(project.cwd,getLanguage());option.disabled=!project.exists;
       select.append(option);
     }
     if(workspacePath&&detectedProjects.some(project=>sameWorkspaceUi(project.cwd,workspacePath)))
@@ -942,7 +994,7 @@ function paintProjectPicker(){
       '履歴がありません。「＋」でフォルダーを登録してください。':
       '履歴がありません。Web版は -Workspace を指定して起動してください。';
   }else{
-    $('project-hint').textContent=workspacePath?workspacePath:'プロジェクトを選択してください。';
+    $('project-hint').textContent=workspacePath?displayLabels.projectLabel(workspacePath,getLanguage()):'プロジェクトを選択してください。';
   }
 }
 async function refreshProjects({force=false,restorePreferred=false}={}){
@@ -974,12 +1026,12 @@ async function switchProject(cwd){
     projectSwitching=false;
     paintProjectPicker();updateButtons();
     await refreshThreads();await refreshUsage();
-    notify('プロジェクトを切り替えました: '+result.workspace);
+    notify('プロジェクトを切り替えました: '+displayLabels.projectLabel(result.workspace,getLanguage()));
   }catch(e){
     projectSwitching=false;
     setCurrentWorkspace(old);
     paintProjectPicker();updateButtons();
-    notify('プロジェクト切替に失敗: '+e.message,true);
+    notify('プロジェクト切替に失敗しました',true);
   }
 }
 function initProjectPicker(){
@@ -994,8 +1046,8 @@ function initProjectPicker(){
         await refreshProjects({force:true});
         try{localStorage.setItem(preferredProjectKey,selected.workspace);}catch{}
         await refreshThreads();await refreshUsage();
-        notify('プロジェクトを追加しました: '+selected.workspace);
-      }catch(error){notify('フォルダーを追加できません: '+error.message,true);}
+        notify('プロジェクトを追加しました: '+displayLabels.projectLabel(selected.workspace,getLanguage()));
+      }catch(error){notify('フォルダーを追加できません',true);}
       finally{$('project-add').disabled=false;}
     });
   }
@@ -1004,7 +1056,7 @@ function initProjectPicker(){
     if(projectSwitching)return;
     $('project-refresh').disabled=true;
     try{await refreshProjects({force:true});await refreshThreads();notify('Codex App Serverからプロジェクトを再検出しました');}
-    catch(e){notify('プロジェクト更新に失敗: '+e.message,true);}
+    catch(e){notify('プロジェクト更新に失敗しました',true);}
     finally{$('project-refresh').disabled=false;}
   });
 }
@@ -1020,20 +1072,20 @@ async function refreshStatus(){
     document.querySelector('.lamp').classList.toggle('ok',status.connected);
     const recovered=status.connected&&!connected;
     connected=status.connected;
-    if(!status.connected){notify(status.error||'Codex CLIのインストールを確認してください',true);return;}
+    if(!status.connected){notify('App Serverに接続できません。Codex CLIの状態を確認してください',true);return;}
     if(recovered){
       let discoveryFailure=status.discoveryError||null;
       try{await refreshProjects({force:true,restorePreferred:!projectInitialized});}
-      catch(error){discoveryFailure=error.message;}
+      catch(error){discoveryFailure=true;}
       connectEvents();await refreshThreads();await refreshUsage();await refreshModelOptions();
-      notify(discoveryFailure?'App Serverに接続しましたがプロジェクト取得に失敗: '+discoveryFailure:
+      notify(discoveryFailure?'App Serverに接続しましたがプロジェクト取得に失敗しました':
         workspacePath?'Codex App Serverに接続しました':'App Serverに接続しました。プロジェクト履歴を確認してください。',!!discoveryFailure);
     }
     else {
       if(needsThreadRefresh)await refreshThreads();
       if(needsUsageRefresh)await refreshUsage();
     }
-  }catch(e){connected=false;$('connection').textContent='APP SERVER OFFLINE';document.querySelector('.lamp').classList.remove('ok');notify(e.message,true);}
+  }catch(e){connected=false;$('connection').textContent='APP SERVER OFFLINE';document.querySelector('.lamp').classList.remove('ok');notify('App Serverに接続できません',true);}
 }
 /** Local tools never call turn/start or alter Codex conversation logs. */
 async function executeLocalItem(item){
@@ -1078,7 +1130,7 @@ async function executeLocalItem(item){
     showUtilityPanel('tools');
     $('local-results').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'center'});
     notify(getLanguage()==='en'?t(item.name)+': checked locally (no Codex turn)':item.name+'：ローカルで確認しました（Codexのターンなし）');
-  }catch(error){notify('ローカル道具のエラー: '+error.message,true);}
+  }catch(error){notify('ローカル道具を実行できません',true);}
   finally{runningLocalItems.delete(item.id);updateButtons();if(button)button.disabled=false;}
 }
 function paintLocalItems(){
@@ -1114,7 +1166,7 @@ async function setupLocalItems(){
       try{await navigator.clipboard.writeText($('local-result-text').textContent);notify('ローカル結果をコピーしました');}
       catch{notify('結果のコピーができませんでした',true);}
     });
-  }catch(error){holder.textContent='ローカル道具を読み込めません: '+error.message;}
+  }catch(error){holder.textContent='ローカル道具を読み込めません';}
 }
 function paintTemplateList(preferred){
   const select=$('template-select');const previous=preferred||select.value;
@@ -1197,7 +1249,7 @@ async function setupPromptTemplates(){
           inventoryState.overrides[id]={title,description,body,recommendedMode};
         }
         persistInventory();paintTemplateList(id);notify('テンプレートを保存しました');
-      }catch(error){notify(error.message,true);}
+      }catch(error){notify('テンプレートを保存できません',true);}
     });
     $('template-delete').addEventListener('click',()=>{
       const id=$('template-select').value;const item=allTemplates().find(x=>x.id===id);if(!item||item.source!=='user')return;
@@ -1226,9 +1278,9 @@ async function setupPromptTemplates(){
         for(const item of imported)current.set(item.id,item);
         if(current.size>100)throw Error('ユーザーテンプレートは100件までです');
         inventoryState.userTemplates=[...current.values()];persistInventory();paintTemplateList();notify(`${imported.length}件のテンプレートを読み込みました`);
-      }catch(error){notify('読込エラー: '+error.message,true);}finally{event.target.value='';}
+      }catch(error){notify('テンプレートを読み込めません',true);}finally{event.target.value='';}
     });
-  }catch(error){$('template-description').textContent='テンプレートを取得できません: '+error.message;}
+  }catch(error){$('template-description').textContent='テンプレートを取得できません';}
 }
 const quotaDescription=window=>window&&typeof window.usedPercent==='number'?
   Math.max(0,100-window.usedPercent)+(getLanguage()==='en'?'% remaining / resets ':'% 残り / 通常リセット ')+dateText(window.resetsAt):
@@ -1283,7 +1335,7 @@ async function openResetCreditDialog(){
     resetDialogMessage('使用するチケットを選び、内容を確認してください。');
     select.focus();
   }catch(e){
-    resetDialogMessage(getLanguage()==='en'?'Could not get ticket information: '+e.message+'. No ticket was redeemed.':'情報を取得できません: '+e.message+'。チケットは消費していません。',true);
+    resetDialogMessage(getLanguage()==='en'?'Could not get ticket information. No ticket was redeemed.':'情報を取得できません。チケットは消費していません。',true);
   }
 }
 async function reviewResetCredit(){
@@ -1311,7 +1363,7 @@ async function reviewResetCredit(){
     $('reset-credit-review-panel').hidden=false;
     resetDialogMessage('最終確認：本当にこのチケットを使用しますか？');
     $('reset-credit-consent').focus();
-  }catch(e){resetDialogMessage('チケットを準備できません: '+e.message,true);}
+  }catch(e){resetDialogMessage('チケットを準備できません',true);}
   finally{button.disabled=false;}
 }
 async function confirmResetCredit(){
@@ -1333,7 +1385,7 @@ async function confirmResetCredit(){
     };
     const text=t(labels[result.outcome]||'処理結果を確認できません。');
     $('reset-credit-result').hidden=false;
-    $('reset-credit-result').textContent=text+(result.refreshError?' '+result.refreshError:'');
+    $('reset-credit-result').textContent=text+(result.refreshError?' '+t('利用状況を更新できませんでした。'):'');
     resetDialogMessage(text);
     $('reset-credit-review-panel').hidden=true;
     $('reset-credit-choose').hidden=true;
@@ -1343,7 +1395,7 @@ async function confirmResetCredit(){
   }catch(e){
     $('reset-credit-result').hidden=false;
     $('reset-credit-result').textContent=t('消費されたか不明な場合があります。重複使用を避けるため、再実行せず利用状況を更新して確認してください。');
-    resetDialogMessage('使用結果を確認できません: '+e.message,true);
+    resetDialogMessage('使用結果を確認できません',true);
     $('reset-credit-review-panel').hidden=true;
     $('reset-credit-choose').hidden=true;
     $('reset-credit-close').textContent=t('閉じる');
@@ -1423,6 +1475,9 @@ async function boot(){
       paintTemplateVariables();
     }
     paintProjectPicker();fillModelChoices();splitPane?.fillModels(true);updateButtons();drawThreads();updateSendPreview();translateDom();
+    $('workspace').textContent=workspacePath?displayLabels.projectLabel(workspacePath,getLanguage()):'App Serverにプロジェクト履歴がありません';
+    $('active-thread').textContent=activeThreadId?displayLabels.threadLabel(activeThreadId,getLanguage()):t('新規チャット');
+    renderActivityFeed();renderWorkspaceConflicts();void splitPane?.refreshThreads();
     window.codexInventory?.setLanguage?.(getLanguage())?.catch(()=>{});
     void refreshUsage().catch(()=>{});
   }});
@@ -1437,6 +1492,8 @@ async function boot(){
     api,post,notify,getLanguage,getLocale,
     getCatalog:()=>modelCatalog,
     getPrimaryThreadId:()=>activeThreadId,
+    labelThread:thread=>displayLabels.threadLabel(thread.id,getLanguage()),
+    onVisibilityChange:()=>{renderActivityFeed();renderWorkspaceConflicts();},
     getRunning:()=>runningThreads,
     getTurnId:id=>runningTurnIds.get(id)||null,
     setTurnId:(id,turnId)=>{if(runningThreads.has(id)&&typeof turnId==='string')runningTurnIds.set(id,turnId);},
@@ -1453,7 +1510,7 @@ async function boot(){
   await setupPromptTemplates();
   $('new-thread').addEventListener('click',()=>createThread());
   $('reload-threads').addEventListener('click',async()=>{
-    await refreshProjects({force:true}).catch(e=>notify('プロジェクト更新失敗: '+e.message,true));
+    await refreshProjects({force:true}).catch(e=>notify('プロジェクト更新に失敗しました',true));
     await refreshThreads();
   });
   $('show-all').addEventListener('change',refreshThreads);
@@ -1462,7 +1519,7 @@ async function boot(){
     const id=activeThreadId,turnId=runningTurnIds.get(id);
     if(!turnId){notify('停止対象のターンを確認できません。状態を更新して再試行してください',true);void refreshRuntimeActivity();return;}
     try{await api('/api/threads/'+encodeURIComponent(id)+'/interrupt',post({turnId}),{workspace:workspacePath,explicit:true});notify('中断を要求しました');}
-    catch(e){notify('中断失敗: '+e.message,true);}
+    catch(e){notify('中断に失敗しました。対象ターンを確認してください',true);}
   });
   $('clear-log').textContent='履歴を再読込';
   $('clear-log').addEventListener('click',async()=>{if(!activeThreadId)return;const id=activeThreadId;activeThreadId=null;await selectThread(id);});

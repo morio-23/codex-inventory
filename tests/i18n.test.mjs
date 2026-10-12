@@ -39,7 +39,8 @@ test('all English built-in templates retain exact IDs and variable placeholders'
 });
 test('UI translation files are explicitly served but other assets remain allowlisted',async()=>{
   const source=await readFile(new URL('../server.mjs',import.meta.url),'utf8');
-  for(const path of ['/i18n.js','/strings.en.js','/templates.en.js']){
+  for(const path of ['/i18n.js','/strings.en.js','/templates.en.js',
+    '/display-labels.js','/conflict-warning-state.js']){
     assert.ok(source.includes("'"+path+"'"),path);
   }
 });

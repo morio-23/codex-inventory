@@ -21,7 +21,7 @@ export function activityFromCodex(event) {
   if (event.method === 'turn/started')return {threadId:id,kind:'started',key:'start:'+id+':'+p.turn?.id};
   if (event.method === 'turn/completed') {
     const kind=STATUS.has(p.turn?.status)?p.turn.status:'completed';
-    return {threadId:id,kind,key:'finish:'+id+':'+p.turn?.id};
+    return {threadId:id,kind,key:'finish:'+id+':'+p.turn?.id,...(kind==='failed'?{persistent:true}:{})};
   }
   if(event.method==='item/started'&&p.item?.type==='commandExecution')
     return {threadId:id,kind:'command',key:'command:'+id+':'+p.item.id};
@@ -52,12 +52,27 @@ export class ActivityTimeline {
     }
     this.entries.push({threadId:value.threadId,kind:value.kind,key:value.key,at:now,persistent:!!value.persistent});
     this.#remember(value.key);
-    while(this.entries.length>this.limit)this.entries.shift();
+    while(this.entries.length>this.limit){
+      const index=this.entries.findIndex(entry=>!entry.persistent||entry.dismissed);
+      if(index<0)break;
+      this.entries.splice(index,1);
+    }
     return true;
   }
   visible({activeThreadIds=[],now=Date.now(),expanded=false}={}) {
     const active=new Set(activeThreadIds);
-    return this.entries.filter(entry=>!active.has(entry.threadId)&&(expanded||entry.persistent||now-entry.at<this.ttlMs)).slice(expanded?-100:-4);
+    return this.entries.filter(entry=>!active.has(entry.threadId)&&
+      (expanded||!entry.dismissed&&(entry.persistent||now-entry.at<this.ttlMs))).slice(expanded?-100:-4);
+  }
+  dismiss(key){
+    const entry=this.entries.find(value=>value.key===key);
+    if(!entry||entry.kind!=='failed'||entry.dismissed)return false;
+    entry.dismissed=true;
+    return true;
+  }
+  reconcileApprovals(activeKeys){
+    const active=new Set(activeKeys);
+    this.entries=this.entries.filter(entry=>entry.kind!=='approval'||active.has(entry.key));
   }
   clearTransient(){this.entries=this.entries.filter(x=>x.persistent);}
   clearApprovals(){
