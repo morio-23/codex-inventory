@@ -1,6 +1,13 @@
 # v0.7 実App Server Smoke Testの隔離準備
 
-準備日: 2026-10-13。起点: `codex/v07-protocol-compat` の `c515e6a`。本書と補助スクリプトは**準備専用**であり、実App Serverの起動、認証、実ターン、実承認は行っていない。[プロトコル事前調査](V07_PROTOCOL_COMPATIBILITY.ja.md)の実環境未検証判定は変わらない。
+準備日: 2026-10-13。起点: `codex/v07-protocol-compat` の `c515e6a`。[プロトコル事前調査](V07_PROTOCOL_COMPATIBILITY.ja.md)参照。2026-10-14に承認済みの段階1だけをホスト上の一時状態で試し、後述の `CONFIG_WARNING` で停止した。段階1は**未合格**。実ターン、実承認、既存スレッド操作は行っていない。
+
+### 段階1の実施結果（2026-10-14）
+
+- Windows 11 Homeの同一ホスト上で行う一時状態方式について、ユーザーの了承を得た。別OSのVMと同等の隔離ではなく、ホストのプロファイルやシステム設定へのアクセスがないことまでは証明できない。この方式を推奨の隔離OS手順と混同しない。
+- 独立した `codex.exe` の数値版 `0.144.6` を確認した。最初の呼び出しはPowerShell変数の未設定で `CLI_PATH_REJECTED` となり、App Server起動前に停止した。引数不足を `MISSING_ARGUMENT` と分類する修正を追加した。
+- 新規の合成状態を作成・検証して読取専用クライアントを実行した。初回は `UNEXPECTED_EVENT`、イベントの固定分類を追加した再実行では `CONFIG_WARNING` で停止した。[公式0.144.6の初期化実装](https://github.com/openai/codex/blob/rust-v0.144.6/codex-rs/app-server/src/request_processors/initialize_processor.rs)は `configWarning` を送信し得るが、今回の警告の原因・内容は未確認。生RPC、警告本文、ID、パス、stderrは記録していない。両回とも合成状態を削除した。
+- `thread/list` の空状態、認証設定を読み込まなかったこと、警告の安全性は確認できていない。段階2以降は未実施。警告を無視して自動再試行しない。
 
 ## 既存起動経路の確認と隔離境界
 
@@ -52,7 +59,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environm
 
 実接続を承認された**後**、隔離OS内の同じセッションで `CODEX_HOME` と `CODEX_SQLITE_HOME` を各合成ディレクトリへ設定する。`USERPROFILE`、`APPDATA`、`LOCALAPPDATA`、一時ディレクトリも隔離OS自身のものであることを確認する。`OPENAI_API_KEY` などの認証環境変数は**名前の有無だけ**確認し、値を表示・保存しない。意図しない値があれば停止する。ホストの認証をコピーして解決しない。
 
-CLI確認は隔離OS内で接続前に `codex --version` のみ実行し、`codex-cli` の数値版だけ記録する。前回調査の対象は `0.144.6`。異なる版なら[プロトコル事前調査](V07_PROTOCOL_COMPATIBILITY.ja.md)の型・Issue影響・モック差をその版で再評価するまで、**段階1へ進まない**。エラーの生出力にパスが含まれ得るため、公開記録に貼らない。今回この版確認コマンドも実行していない。
+CLI確認は隔離OS内で接続前に `codex --version` のみ実行し、`codex-cli` の数値版だけ記録する。前回調査の対象は `0.144.6`。異なる版なら[プロトコル事前調査](V07_PROTOCOL_COMPATIBILITY.ja.md)の型・Issue影響・モック差をその版で再評価するまで、**段階1へ進まない**。エラーの生出力にパスが含まれ得るため、公開記録に貼らない。
 
 段階1の接続は、将来承認された場合に限り、同梱の `scripts/v07-smoke-readonly.mjs` を使う。隔離OS内のスタンドアロン `codex.exe` を `$smokeCli` に指定し、**明示承認後にのみ**次のコマンドを実行する。`.cmd` ラッパーやDesktopのGUI実行ファイルは受け付けない。
 
@@ -61,7 +68,7 @@ CLI確認は隔離OS内で接続前に `codex --version` のみ実行し、`code
 node .\scripts\v07-smoke-readonly.mjs --root $smokeRoot --cli $smokeCli --approved-readonly-app-server
 ```
 
-このクライアントは準備状態とCLI版を再確認した後に初めて `codex.exe app-server` を起動する。子プロセスへ渡す環境変数をOS動作に必要なものと一時 `CODEX_HOME` / `CODEX_SQLITE_HOME` に絞り、`initialize` / `initialized` と `thread/list` だけを使う。結果は固定の成功・停止分類だけ表示し、生JSON-RPC、ID、パス、stderrを表示しない。初期一覧が空でなければ停止する。**このコマンドは今回実行していない。**
+このクライアントは準備状態とCLI版を再確認した後に初めて `codex.exe app-server` を起動する。子プロセスへ渡す環境変数をOS動作に必要なものと一時 `CODEX_HOME` / `CODEX_SQLITE_HOME` に絞り、`initialize` / `initialized` と `thread/list` だけを使う。結果は固定の成功・停止分類だけ表示し、生JSON-RPC、ID、パス、stderrを表示しない。初期一覧が空でなければ停止する。上記の実施結果はこのコマンドによる。
 
 ### 接続前の安全チェックリスト
 
@@ -74,7 +81,7 @@ node .\scripts\v07-smoke-readonly.mjs --root $smokeRoot --cli $smokeCli --approv
 - [ ] 生JSON-RPC、stderr、トレース、スクリーンショットを保存しない記録方法と、停止・削除手順が用意されている。
 - [ ] 該当段階の明示承認を得ている。承認がない段階へ自動移行しない。
 
-## 将来の実接続段階（今回はすべて未実施）
+## 段階別の実接続手順（段階1は停止、段階2以降は未実施）
 
 | 段階 | 実行条件・操作 | 費用 / 禁止操作 | 合格基準・停止条件 |
 | --- | --- | --- | --- |
@@ -95,6 +102,6 @@ node .\scripts\v07-smoke-readonly.mjs --root $smokeRoot --cli $smokeCli --approv
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Cleanup -Root $smokeRoot -ConfirmCleanup
 ```
 
-削除スクリプトは、OS一時ディレクトリ直下の規定名、合成マーカー、シンボリックリンク・ジャンクション不在を確認した後に、そのルートだけを削除する。確認に失敗した場合は削除せず、人が対象を再確認する。今回の作業ではテストが作った合成一時環境だけを削除し、実Codex状態は作成していない。
+削除スクリプトは、OS一時ディレクトリ直下の規定名、合成マーカー、シンボリックリンク・ジャンクション不在を確認した後に、そのルートだけを削除する。確認に失敗した場合は削除せず、人が対象を再確認する。今回の段階1で使った合成一時状態は削除した。
 
-**次の判断:** 隔離OSと匿名化されたRPC記録方法を確認した上で、まず段階1のApp Server起動を明示的に承認する必要がある。承認があるまで実接続を開始しない。
+**次の判断:** `CONFIG_WARNING` の原因を安全に特定し、ホスト上の隔離限界を再評価するまで段階1の再試行を停止する。段階2以降の推論・承認には別途明示承認が必要。

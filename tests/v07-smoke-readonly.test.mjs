@@ -18,6 +18,15 @@ test('real connection launcher refuses to run without the explicit stage-one fla
   assert.doesNotMatch(attempted.stdout+attempted.stderr,/synthetic-root|synthetic-codex/);
   });
 
+test('real connection launcher reports a missing CLI value before inspecting it',
+  {skip:process.platform!=='win32'},()=>{
+  const attempted=spawnSync(process.execPath,[script,'--root','synthetic-root',
+    '--cli','--approved-readonly-app-server'],{encoding:'utf8',timeout:5000});
+  assert.notEqual(attempted.status,0);
+  assert.match(attempted.stderr,/READONLY_STOP: MISSING_ARGUMENT/);
+  assert.doesNotMatch(attempted.stdout+attempted.stderr,/synthetic-root/);
+  });
+
 test('read-only smoke handshake uses only the empty synthetic thread list',async t=>{
   const client=new AppServerClient({command:process.execPath,args:[fixture],timeoutMs:5000});
   t.after(()=>client.close());
@@ -44,4 +53,22 @@ test('read-only smoke handshake stops on an unexpected server notification',asyn
   fake.start=async()=>fake.emit('notification',{method:'synthetic/auth-required'});
   fake.request=async()=>({data:[]});
   await assert.rejects(()=>readOnlyHandshake(fake),{code:'UNEXPECTED_EVENT'});
+});
+
+test('read-only smoke handshake classifies known startup warnings without their contents',async()=>{
+  const fake=new EventEmitter();
+  fake.start=async()=>fake.emit('notification',{
+    method:'configWarning',params:{details:'synthetic-secret-path'}
+  });
+  fake.request=async()=>({data:[]});
+  await assert.rejects(()=>readOnlyHandshake(fake),error=>
+    error.code==='CONFIG_WARNING'&&!error.message.includes('synthetic-secret-path'));
+});
+
+test('read-only smoke handshake classifies client warnings without their contents',async()=>{
+  const fake=new EventEmitter();
+  fake.start=async()=>fake.emit('warning','synthetic-secret-path');
+  fake.request=async()=>({data:[]});
+  await assert.rejects(()=>readOnlyHandshake(fake),error=>
+    error.code==='CLIENT_WARNING'&&!error.message.includes('synthetic-secret-path'));
 });

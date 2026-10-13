@@ -12,28 +12,40 @@ function stop(code){throw Object.assign(new Error(code),{code});}
 
 /** Only request metadata from a newly empty synthetic Codex home. */
 export async function readOnlyHandshake(client){
-  let unexpected=false;
-  const flag=()=>{unexpected=true;};
-  client.on?.('notification',flag);
-  client.on?.('warning',flag);
+  let unexpectedCode;
+  const flagNotification=notification=>{
+    // Record only a fixed category; params may contain paths or account details.
+    switch(notification?.method){
+      case 'configWarning': unexpectedCode ??= 'CONFIG_WARNING';break;
+      case 'warning': unexpectedCode ??= 'SERVER_WARNING';break;
+      case 'account/updated': unexpectedCode ??= 'ACCOUNT_EVENT';break;
+      case 'remoteControl/status/changed': unexpectedCode ??= 'REMOTE_CONTROL_STATUS';break;
+      default: unexpectedCode ??= 'UNEXPECTED_EVENT';
+    }
+  };
+  const flagWarning=()=>{unexpectedCode ??= 'CLIENT_WARNING';};
+  client.on?.('notification',flagNotification);
+  client.on?.('warning',flagWarning);
   try{
     await client.start();
-    if(unexpected)stop('UNEXPECTED_EVENT');
+    if(unexpectedCode)stop(unexpectedCode);
     const response=await client.request('thread/list',{});
-    if(unexpected)stop('UNEXPECTED_EVENT');
+    if(unexpectedCode)stop(unexpectedCode);
     if(!Array.isArray(response?.data))stop('MALFORMED_RESPONSE');
     if(response.data.length||response.nextCursor)stop('NONEMPTY_STATE');
     return 'EMPTY';
   }finally{
-    client.off?.('notification',flag);
-    client.off?.('warning',flag);
+    client.off?.('notification',flagNotification);
+    client.off?.('warning',flagWarning);
   }
 }
 
 function argumentsFrom(argv){
   if(!argv.includes('--approved-readonly-app-server'))stop('APPROVAL_REQUIRED');
   const rootIndex=argv.indexOf('--root'),cliIndex=argv.indexOf('--cli');
-  if(rootIndex<0||cliIndex<0||!argv[rootIndex+1]||!argv[cliIndex+1])stop('MISSING_ARGUMENT');
+  if(rootIndex<0||cliIndex<0||!argv[rootIndex+1]||!argv[cliIndex+1]||
+    argv[rootIndex+1].startsWith('--')||argv[cliIndex+1].startsWith('--'))
+    stop('MISSING_ARGUMENT');
   return {root:argv[rootIndex+1],cli:argv[cliIndex+1]};
 }
 
@@ -87,7 +99,9 @@ async function main(){
   }catch(error){
     const known=new Set(['WINDOWS_REQUIRED','APPROVAL_REQUIRED','MISSING_ARGUMENT',
       'CLI_PATH_REJECTED','PREPARATION_NOT_READY','VERSION_UNAVAILABLE',
-      'VERSION_CHANGED','MALFORMED_RESPONSE','NONEMPTY_STATE','UNEXPECTED_EVENT']);
+      'VERSION_CHANGED','MALFORMED_RESPONSE','NONEMPTY_STATE','UNEXPECTED_EVENT',
+      'CONFIG_WARNING','SERVER_WARNING','ACCOUNT_EVENT','REMOTE_CONTROL_STATUS',
+      'CLIENT_WARNING']);
     const category=known.has(error.code)?error.code:
       /timeout|タイムアウト/i.test(error.message||'')?'TIMEOUT':'RPC_OR_LAUNCH_ERROR';
     console.error(`READONLY_STOP: ${category}. No raw response was recorded.`);
