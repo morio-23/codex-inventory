@@ -38,6 +38,8 @@ SSE遮断中の完了は、再接続時に実行状態だけが復元され、�
 
 ## App Server互換性と手動Smoke Test
 
+2026-10-13の追加調査と合成契約テストは [v0.7 App Serverプロトコル事前互換性調査](V07_PROTOCOL_COMPATIBILITY.ja.md) に記録した。以下は最終統合検証時点の記録であり、実接続の未検証判定は変わらない。
+
 コードと公開プロトコル定義の照合では、`initialize`/`initialized`、`thread/start`、`turn/start`、`turn/completed`、`thread/resume`の基本構造は整合する。参照: [App Server説明](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server)、[turn定義](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)。ただしモックの承認要求は実プロトコルの時刻・環境情報を省略し、モックの`turn/interrupt`は`turnId`を厳密に評価しない。SSEにイベントID・再送はなく、再接続はHTTPスナップショットで補っている。`thread/read`の全ターン読み込みは長い履歴で性能リスクがある。実App Serverの再起動・再開、権限要求の各種類、完了イベント順序、Desktopが所有するライブスレッドとの関係は未検証。
 
 明示的な承認が得られた場合の読取専用・最小権限の手順:

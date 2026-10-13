@@ -35,7 +35,7 @@ export class AppServerClient extends EventEmitter {
     createInterface({input:child.stdout}).on('line', line => {
       if(generation===this.generation&&!this.closed)this.#receive(line);
     });
-    const result = await this.request('initialize', {clientInfo:{name:'codex_inventory',title:'Codex Inventory',version:'0.6.0'},capabilities:{experimentalApi:false}}, {skipReady:true});
+    const result = await this.request('initialize', {clientInfo:{name:'codex_inventory',title:'Codex Inventory',version:'0.6.0'},capabilities:{experimentalApi:false,requestAttestation:false}}, {skipReady:true});
     this.notify('initialized', {});
     this.emit('ready', result);
     return result;
