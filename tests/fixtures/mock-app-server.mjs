@@ -40,7 +40,10 @@ async function handle(packet){
     const marker=process.env.MOCK_DISCONNECT_MARKER;
     if(!marker||!existsSync(marker)){if(marker)writeFileSync(marker,'1');process.exit(7);}
   }
-  if(method==='initialize')return success(id,{userAgent:'mock-app-server/1.0'});
+  if(method==='initialize'){
+    if(params.capabilities?.requestAttestation!==false)return fail(id,'Missing explicit attestation capability');
+    return success(id,{userAgent:'mock-app-server/1.0'});
+  }
   if(method==='initialized')return;
   if(method==='account/read')return success(id,{account:{type:'chatgpt',planType:'plus'}});
   if(method==='model/list')return success(id,{data:[
@@ -106,6 +109,8 @@ async function handle(packet){
     return success(id,{thread:compact(t)});
   }
   if(method==='turn/start'){
+    if(params.input?.[0]?.type!=='text'||!Array.isArray(params.input[0].text_elements))
+      return fail(id,'Invalid text input shape');
     if(params.effort!==undefined){
       const options=params.model==='mock-deep'?['high','xhigh','ultra']:['low','medium','high'];
       if(!options.includes(params.effort))return fail(id,'Unsupported model/effort combination');
@@ -129,12 +134,17 @@ async function handle(packet){
         const requestId=90000+nextId;
         pendingApprovals.set(requestId,resolve);
         const requested={threadId:t.id,turnId:turn.id,itemId:'approve-'+nextId,
-          reason:'Approval integration test'};
+          startedAtMs:Date.now(),reason:'Approval integration test'};
         if(approvalKind==='file')requested.grantRoot=t.cwd;
         else if(approvalKind==='permissions'){
           requested.cwd=t.cwd;
+          requested.environmentId=null;
           requested.permissions={network:{enabled:true},fileSystem:null};
-        }else{requested.command='echo APPROVAL_TEST';requested.cwd=t.cwd;}
+        }else{
+          requested.kind=approvalKind==='writeStdin'?'writeStdin':'command';
+          requested.environmentId=null;
+          requested.command='echo APPROVAL_TEST';requested.cwd=t.cwd;
+        }
         write({id:requestId,method,params:requested});
         if(process.env.MOCK_DUP_APPROVAL_ID==='1')write({id:requestId,method,params:requested});
       });
@@ -169,6 +179,7 @@ async function handle(packet){
   if(method==='turn/interrupt'){
     const t=threads.get(params.threadId);const record=active.get(params.threadId);
     if(!t||!record)return fail(id,'No active turn');
+    if(params.turnId!==record.turn.id)return fail(id,'Active turn id does not match');
     record.turn.status='interrupted';active.delete(params.threadId);persist();success(id,{});
     event('turn/completed',{threadId:params.threadId,turn:{id:record.turn.id,status:'interrupted'}});return;
   }

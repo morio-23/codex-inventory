@@ -276,7 +276,7 @@ export class CodexService extends EventEmitter {
     await this.validateWorkspace(cwd);
     if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。再度新規作成してください'),{status:409});
     if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
-    const result=await this.client.request('thread/start',{cwd,approvalPolicy:'on-request',sandbox:editing?'workspace-write':'read-only',ephemeral:false,...(preferred?{model:preferred}:{})});
+    const result=await this.client.request('thread/start',{cwd,approvalPolicy:'on-request',approvalsReviewer:'user',sandbox:editing?'workspace-write':'read-only',ephemeral:false,...(preferred?{model:preferred}:{})});
     const thread={...simplifyThread(result.thread),cwd:result.thread?.cwd||cwd};this.subscribed.add(thread.id);this.knownThreads.set(thread.id,thread);
     this.emit('event',{type:'thread',threadId:thread.id,thread});
     return {thread};
@@ -302,6 +302,7 @@ export class CodexService extends EventEmitter {
       const record=await this.readThread(threadId);
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       if(!sameWorkspace(record.thread?.cwd,cwd)) throw Object.assign(new Error('別プロジェクトのチャットです。画面で所属プロジェクトを選択してください。'),{status:409});
+      if(record.rawStatus?.type==='active')throw Object.assign(new Error('このスレッドは別のクライアントで実行中です'),{status:409});
       const selection=await this.selectedModel({model,effort});
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       await this.ensureSubscribed(threadId);
@@ -309,8 +310,8 @@ export class CodexService extends EventEmitter {
       await this.validateWorkspace(cwd);
       if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409});
       const text=action==='quest'?prompt.trim():`${taskInstructions[action]}\n\n【ユーザー依頼】\n${prompt.trim()}`;
-      const input=[{type:'text',text}];
-      const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',sandboxPolicy:editing?{type:'workspaceWrite',writableRoots:[cwd],networkAccess:false}:{type:'readOnly'}},{timeoutMs:60000});
+      const input=[{type:'text',text,text_elements:[]}];
+      const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',approvalsReviewer:'user',sandboxPolicy:editing?{type:'workspaceWrite',writableRoots:[cwd],networkAccess:false}:{type:'readOnly'}},{timeoutMs:60000});
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       const turnId=result?.turn?.id;
       const early=this.earlyCompletions.get(threadId)?.get(turnId);
@@ -350,7 +351,8 @@ export class CodexService extends EventEmitter {
     const workspace=this.turnWorkspaces.get(threadId);
     if(typeof threadId!=='string'||typeof turnId!=='string'||!workspace||
       params.cwd!=null&&!withinWorkspace(params.cwd,workspace)||
-      params.grantRoot!=null&&!withinWorkspace(params.grantRoot,workspace)){
+      params.grantRoot!=null&&!withinWorkspace(params.grantRoot,workspace)||
+      method==='item/commandExecution/requestApproval'&&params.kind!==undefined&&params.kind!=='command'){
       this.#rejectApprovalRequest(id,method);return;
     }
     if(runningTurn==='starting'){

@@ -34,6 +34,72 @@ test('JSON RPC handshake, thread creation and history retrieval',async t=>{
   assert.match(read.messages[0].text,/Hello Desktop/);
   assert.match(read.messages[1].text,/App Server/);
 });
+test('v2 requests declare explicit review routing and complete text input shape',async t=>{
+  const client=new AppServerClient({command:process.execPath,args:[fake],timeoutMs:5000});
+  t.after(()=>client.close());
+  const observed=new Map();
+  const request=client.request.bind(client);
+  client.request=(method,params,options)=>{
+    if(['initialize','thread/start','turn/start'].includes(method))observed.set(method,params);
+    return request(method,params,options);
+  };
+  const service=new CodexService(client,{workspace:process.cwd()});
+  await service.start();
+  const {thread}=await service.createThread();
+  await service.startTurn({threadId:thread.id,prompt:'Synthetic contract input'});
+  assert.equal(observed.get('initialize')?.capabilities?.requestAttestation,false);
+  assert.equal(observed.get('thread/start')?.approvalsReviewer,'user');
+  assert.equal(observed.get('turn/start')?.approvalsReviewer,'user');
+  assert.deepEqual(observed.get('turn/start')?.input,[
+    {type:'text',text:'Synthetic contract input',text_elements:[]}
+  ]);
+  await complete(service,thread.id);
+});
+
+test('current command approval mock carries protocol correlation metadata',async t=>{
+  const {client,service}=await harness({MOCK_APPROVAL_REQUEST:'1'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:true});
+  const requested=new Promise(resolve=>client.once('server-request',resolve));
+  const started=await service.startTurn({threadId:thread.id,prompt:'Synthetic approval',editing:true});
+  const approval=await requested;
+  assert.equal(approval.method,'item/commandExecution/requestApproval');
+  assert.equal(approval.params.threadId,thread.id);
+  assert.equal(approval.params.turnId,started.turnId);
+  assert.equal(approval.params.kind,'command');
+  assert.equal(typeof approval.params.startedAtMs,'number');
+  assert.equal(approval.params.environmentId,null);
+  service.respondApproval({approvalId:service.listApprovals().approvals[0].approvalId,
+    decision:'decline',workspace:process.cwd()});
+  await complete(service,thread.id);
+});
+
+test('mock interrupt rejects a stale turn id and keeps the current turn',async t=>{
+  const {client,service}=await harness({MOCK_TURN_DELAY_MS:'3000'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread();
+  const started=await service.startTurn({threadId:thread.id,prompt:'Synthetic long turn'});
+  await assert.rejects(()=>client.request('turn/interrupt',
+    {threadId:thread.id,turnId:'synthetic-stale-turn'}));
+  assert.equal(service.running.get(thread.id),started.turnId);
+  await service.interrupt(thread.id,{turnId:started.turnId});
+});
+
+test('writeStdin approval fails closed without an actionable Inventory prompt',async t=>{
+  const {client,service}=await harness({MOCK_APPROVAL_REQUEST:'1',MOCK_APPROVAL_KIND:'writeStdin'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:true});
+  const requested=new Promise(resolve=>client.once('server-request',resolve));
+  const finished=new Promise(resolve=>service.on('event',function handler(e){
+    if(e.type==='codex'&&e.method==='turn/completed'){
+      service.off('event',handler);resolve(e.params.turn);
+    }
+  }));
+  await service.startTurn({threadId:thread.id,prompt:'Synthetic stdin approval',editing:true});
+  await requested;
+  assert.deepEqual(service.listApprovals().approvals,[]);
+  assert.equal((await finished).status,'failed');
+});
 test('a newly created, unmaterialized thread has an empty readable history',async t=>{
   const {client,service}=await harness();t.after(()=>client.close());
   const {thread}=await service.createThread();
@@ -60,6 +126,23 @@ test('two threads can run concurrently and each is protected against double run'
   await assert.rejects(()=>service.startTurn({threadId:a,prompt:'not allowed'}),/実行中/);
   await Promise.all([complete(service,a),complete(service,b)]);
   assert.equal(service.running.size,0);
+});
+test('an externally active thread is not steered by a new Inventory turn',async t=>{
+  const {client,service}=await harness({MOCK_TURN_DELAY_MS:'3000'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread();
+  let turnStarts=0;
+  const request=client.request.bind(client);
+  client.request=(method,params,options)=>{
+    if(method==='turn/start')turnStarts++;
+    return request(method,params,options);
+  };
+  const external=await client.request('turn/start',{threadId:thread.id,cwd:process.cwd(),
+    input:[{type:'text',text:'Synthetic external turn',text_elements:[]}],
+    approvalPolicy:'on-request',sandboxPolicy:{type:'readOnly'}});
+  await assert.rejects(()=>service.startTurn({threadId:thread.id,prompt:'Do not steer'}),{status:409});
+  assert.equal(turnStarts,1);
+  await client.request('turn/interrupt',{threadId:thread.id,turnId:external.turn.id});
 });
 test('rate limits show actual used percent and reset timestamps',async t=>{
   const {client,service}=await harness();t.after(()=>client.close());
