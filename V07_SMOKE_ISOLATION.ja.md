@@ -7,7 +7,34 @@
 - `run.ps1` の通常モードと `npm start` は `server.mjs` を経由して `codex app-server` を起動する。`run.ps1` は固定ワークスペースの実パスも表示する。準備・読取専用検証には使用しない。`-Demo` はモック専用で、実互換性は確認できない。
 - Desktopの `desktop/main.cjs` はCLI検出後にApp Serverを起動し、`account/read` も呼ぶ。既存の `--inventory-isolated-smoke` / `CODEX_INVENTORY_SMOKE_PROFILE` はElectronの `userData` だけを一時化する。**Codexの `CODEX_HOME`、認証、履歴、CLI検出先、作業ディレクトリまでは隔離しない。** 実接続の入口にDesktopを使わない。
 - `app-server-client.mjs` は子プロセスへ環境変数を渡す。`server.mjs` の埋め込み起動も既定では `process.env` とユーザーホームのcwdを使う。キー・プロキシ・Codex状態の環境変数を持つホストシェルから直接起動しない。
-- 公式Codexの設定は `CODEX_HOME/config.toml` のほか、システム設定とcwd・親ディレクトリ・リポジトリ設定のレイヤーを読み得る。[公式設定ローダー](https://github.com/openai/codex/blob/main/codex-rs/config/src/loader/mod.rs)参照。**空の `CODEX_HOME` だけでは完全隔離を証明できない。** 実接続には、ホストのユーザープロファイルと共有フォルダーを持たない使い捨てWindows VMまたはWindows Sandboxを使う。Windows Sandboxが使えない場合は準備で停止する。
+- 公式Codexの設定は `CODEX_HOME/config.toml` のほか、システム設定とcwd・親ディレクトリ・リポジトリ設定のレイヤーを読み得る。[公式設定ローダー](https://github.com/openai/codex/blob/main/codex-rs/config/src/loader/mod.rs)参照。**空の `CODEX_HOME` だけでは完全隔離を証明できない。** 実接続には、ホストのユーザープロファイルと共有フォルダーを持たない使い捨てWindows VMまたはWindows Sandboxを使う。両方とも用意できない場合は準備で停止する。
+
+### Windows 11 Homeでの手作業ルート
+
+Windows SandboxはWindows Homeでサポートされない。[Microsoftの対応エディション表](https://learn.microsoft.com/en-us/windows/security/threat-protection/windows-sandbox/windows-sandbox-overview)を参照。HomeではSandboxの有効化を試みず、次の順に**新規の使い捨てWindows VM**を用意する。既存VMやホスト上のCodex状態は使わない。
+
+1. [Oracle VirtualBoxの公式配布ページ](https://www.virtualbox.org/wiki/Downloads)など、正規の仮想化ソフトを使用する。Windows 11のインストール媒体は[Microsoftの公式ページ](https://www.microsoft.com/software-download/windows11)から取得し、利用条件を確認する。VMの作成前に、ホスト側の空き容量、仮想化支援、ゲストOSの要件を確認する。Windows 11ゲストには少なくとも2仮想CPU、4 GB RAM、64 GBディスクと適切な仮想TPM・Secure Boot設定が必要。[MicrosoftのVM要件](https://learn.microsoft.com/en-us/windows/whats-new/windows-11-requirements)参照。
+2. 新しいVMを作り、**共有フォルダーなし、共有クリップボード無効、ドラッグ&ドロップ無効、USBパススルーなし**にする。Guest Additionsで共有を有効にしない。新規のテスト用OSユーザーを使い、ホストのMicrosoftアカウント、Codex認証、ブラウザープロファイル、クラウド同期を持ち込まない。Windowsセットアップが実アカウントの入力を要求する場合は停止する。仮想化ソフトの既定NATはホストへ通信できる場合があるので、必要な公開ツールを隔離OS内で取得した後、**段階1の前にVMのネットワークアダプターを無効化**する。[VirtualBoxのネットワーク説明](https://docs.oracle.com/en/virtualization/virtualbox/7.2/user/networkingdetails.html)参照。
+3. VM内で公式配布のGit、Node.js、対象Codex CLIを用意する。公開リポジトリの `codex/v07-smoke-isolation` をVM内へ直接取得し、期待したコミットを確認する。ホストのフォルダーやCLI実行ファイルを共有・コピーしない。CLIを `0.144.6` に固定し、異なる版なら[互換性調査](V07_PROTOCOL_COMPATIBILITY.ja.md)を再評価するまで停止する。
+4. VM内のPowerShellで、下記「段階0」の `Prepare` と `Verify` を行う。`READY` を確認したらVMのネットワークが無効であることを確認し、下記「段階1」の**承認済み読取専用**コマンドだけを実行する。`initialize` / `initialized` と空の `thread/list` 以外へ進まない。固定の結果分類だけ記録し、生RPC、パス、ID、stderrをホストや公開リポジトリへ転送しない。
+5. `Cleanup` が対象の合成一時ルートだけを削除することを確認して実行し、VMを停止する。必要な結果分類を控えた後、対象VMと仮想ディスクを仮想化ソフトから削除する。別VMやホストのファイルは削除しない。
+
+手順3のVM内PowerShell例。GitとNode.jsはそれぞれ公式配布物をVM内へインストールしてから実行する。`codex.exe` が一意に見つからない、版が一致しない、または検査が失敗したら段階1へ進まない。インストール出力は公開しない。
+
+```powershell
+git clone --single-branch --branch codex/v07-smoke-isolation https://github.com/morio-23/codex-inventory.git codex-inventory-smoke
+Set-Location .\codex-inventory-smoke
+git merge-base --is-ancestor d5422ae HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Smoke source is not based on the prepared revision.' }
+npm install --global @openai/codex@0.144.6
+$globalNpmRoot = npm root --global
+$cliCandidates = @(Get-ChildItem -LiteralPath $globalNpmRoot -Filter codex.exe -File -Recurse)
+if ($cliCandidates.Count -ne 1) { throw 'Expected exactly one standalone codex.exe.' }
+$smokeCli = $cliCandidates[0].FullName
+& $smokeCli --version
+```
+
+VM内の操作をこちらから実行できない場合、手作業が必要なのはこのVM作成・設定と段階1コマンドの実行である。結果を共有する際は `READY`、CLI数値版、段階1の固定成功・失敗分類だけにする。段階2以降の推論・承認・再接続にはそれぞれ別途承認が必要。
 
 ## 段階0: 使い捨て環境の作成（実接続なし）
 
