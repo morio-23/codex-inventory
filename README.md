@@ -12,9 +12,9 @@
 
 **License:** [MIT](LICENSE) © 2026 morio-23. See [Contributing](CONTRIBUTING.md) and [Security policy](SECURITY.md).
 
-**Release status:** Windows v0.6 EXEs are still undergoing release acceptance. Once approved, Setup and Portable executables and their SHA-256 checksums will be distributed via [GitHub Releases](https://github.com/morio-23/codex-inventory/releases), **not committed to Git**. No approved binary release is implied by the presence of source code. See the [release checklist](RELEASE_ACCEPTANCE.md) or its [Japanese version](RELEASE_ACCEPTANCE.ja.md).
+**Release status (October 23, 2026):** [v0.6.0-beta.1](https://github.com/morio-23/codex-inventory/releases/tag/v0.6.0-beta.1) has already been published with Windows Setup/Portable EXEs and SHA-256 checksums. The v0.7 Windows binaries remain unreleased and blocked pending real App Server and Windows acceptance checks. See the [v0.7 release-readiness draft](V07_RELEASE_READINESS.md).
 
-**Public source repository:** This is an MIT-licensed independent OSS project with a fresh Git history. GitHub Actions runs only when explicitly started; [run tests locally](PUBLICATION_CHECKLIST.md). **Windows EXE distribution has not been approved yet.**
+**Public source repository:** Independent MIT-licensed OSS with a fresh Git history. GitHub Actions runs only when explicitly started; [run tests locally](PUBLICATION_CHECKLIST.md). The existence of a previous beta EXE does **not** certify the unverified v0.7 build.
 
 ## Interface language (English / 日本語)
 
