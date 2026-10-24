@@ -61,7 +61,7 @@ test('legacy thread display title can be read from saved user turns with no meta
   assert.equal(labels.rememberHistoryTitle(thread.id,[
     {role:'command',text:'SYNTHETIC_COMMAND'},
     {role:'assistant',text:'SYNTHETIC_ANSWER'},
-    {role:'user',text:'  【ユーザー依頼】\\n リポジトリの構成を調べて   '}
+    {role:'user',text:'  【ユーザー依頼】\n リポジトリの構成を調べて   '}
   ]),true);
   assert.equal(labels.threadLabel(thread,'ja'),'リポジトリの構成を調べて');
   assert.equal(labels.threadLabel(thread.id,'en'),'リポジトリの構成を調べて');
