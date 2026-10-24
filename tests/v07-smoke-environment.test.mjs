@@ -23,6 +23,9 @@ test('synthetic smoke state can be prepared, checked and removed without launchi
       assert.equal(existsSync(join(path,'codex-home','config.toml')),true);
       assert.equal(existsSync(join(path,'workspace-a','README.txt')),true);
       assert.equal(existsSync(join(path,'workspace-b','README.txt')),true);
+      for(const dir of ['profile','profile/AppData/Roaming','profile/AppData/Local','profile/ProgramData','profile/Temp']){
+        assert.equal(existsSync(join(path,dir)),true,'synthetic profile missing '+dir);
+      }
       assert.equal(existsSync(join(path,'codex-home','auth.json')),false);
       assert.equal(run('Verify',path).status,0,'synthetic verification failed');
       assert.equal(run('Cleanup',path).status!==0,true,'cleanup needs an explicit switch');

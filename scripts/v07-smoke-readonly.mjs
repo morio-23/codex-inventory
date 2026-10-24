@@ -4,22 +4,57 @@ import {join,resolve,basename,win32} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {AppServerClient} from '../app-server-client.mjs';
 
-const expectedVersion='0.144.6';
+// The two v0.144 tags share initialization and startup warning handling.
+// The v0.164 tag retains initialize/configWarning and the empty thread/list
+// contract but has broader internal changes. This allowlist is STAGE-ONE ONLY:
+// it is not proof of full Inventory protocol compatibility.
+export const supportedReadOnlyVersions=Object.freeze(['0.144.5','0.144.6','0.164.0']);
 const self=fileURLToPath(import.meta.url);
 const environmentScript=fileURLToPath(new URL('./v07-smoke-environment.ps1',import.meta.url));
 
 function stop(code){throw Object.assign(new Error(code),{code});}
 
+// These exact public strings come from openai/codex rust-v0.144.6 app-server
+// startup warnings. Do not inspect, print, hash, or persist the actual detail,
+// path, range, or unknown summary: they may include local/private information.
+// Classification is *not* permission to bypass a warning or continue the test.
+const untrustedProjectPrefix='Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\n';
+export function classifyStartupConfigWarning(params){
+  const summary=params?.summary;
+  if(typeof summary!=='string')return 'CONFIG_WARNING';
+  switch(summary){
+    case 'Invalid configuration; using defaults.':return 'CONFIG_INVALID_DEFAULTS';
+    case 'Codex rebuilt its local database.':return 'CONFIG_SQLITE_RECOVERY';
+    case 'Error parsing rules; custom rules not applied.':return 'CONFIG_EXEC_POLICY';
+    default:
+      return summary.startsWith(untrustedProjectPrefix)
+        ? 'CONFIG_UNTRUSTED_PROJECT' : 'CONFIG_WARNING';
+  }
+}
+
 /** Only request metadata from a newly empty synthetic Codex home. */
-export async function readOnlyHandshake(client){
+// v0.164.0 sends this notification after initialize for every new connection.
+// Only the explicit disabled state with no environment is expected in the
+// diagnostic. Never copy serverName/installationId into diagnostics.
+export function isDisabledRemoteControlStatus(params){
+  return params?.status==='disabled' && params?.environmentId===null &&
+    typeof params?.serverName==='string' &&
+    typeof params?.installationId==='string';
+}
+
+export async function readOnlyHandshake(client,{allowDisabledRemoteStatus=false}={}){
   let unexpectedCode;
   const flagNotification=notification=>{
-    // Record only a fixed category; params may contain paths or account details.
+    // Record only fixed categories; remote identity/paths must not be logged.
     switch(notification?.method){
-      case 'configWarning': unexpectedCode ??= 'CONFIG_WARNING';break;
+      case 'configWarning': unexpectedCode ??= classifyStartupConfigWarning(notification?.params);break;
       case 'warning': unexpectedCode ??= 'SERVER_WARNING';break;
       case 'account/updated': unexpectedCode ??= 'ACCOUNT_EVENT';break;
-      case 'remoteControl/status/changed': unexpectedCode ??= 'REMOTE_CONTROL_STATUS';break;
+      case 'remoteControl/status/changed':
+        if(!allowDisabledRemoteStatus ||
+          !isDisabledRemoteControlStatus(notification?.params))
+          unexpectedCode ??= 'REMOTE_CONTROL_STATUS';
+        break;
       default: unexpectedCode ??= 'UNEXPECTED_EVENT';
     }
   };
@@ -28,6 +63,10 @@ export async function readOnlyHandshake(client){
   client.on?.('warning',flagWarning);
   try{
     await client.start();
+    // App Server can queue startup notifications just after the initialize
+    // response. Give the warning handler a bounded chance to receive them
+    // before even asking for an empty thread list. Not an OS isolation barrier.
+    await new Promise(resolve=>setTimeout(resolve,300));
     if(unexpectedCode)stop(unexpectedCode);
     const response=await client.request('thread/list',{});
     if(unexpectedCode)stop(unexpectedCode);
@@ -49,15 +88,33 @@ function argumentsFrom(argv){
   return {root:argv[rootIndex+1],cli:argv[cliIndex+1]};
 }
 
-function isolatedEnvironment(root){
-  const env={};
-  for(const name of ['SystemRoot','WINDIR','ComSpec','PATHEXT','TEMP','TMP',
-    'USERPROFILE','APPDATA','LOCALAPPDATA','PROGRAMDATA']){
-    if(process.env[name])env[name]=process.env[name];
-  }
-  env.Path=process.env.Path||process.env.PATH||'';
-  env.CODEX_HOME=join(root,'codex-home');
-  env.CODEX_SQLITE_HOME=join(root,'codex-sqlite');
+// Partial containment for a user-approved read-only test on the existing host.
+// Environment variables are redirected to synthetic folders; Windows identity,
+// OS APIs, system-wide config, inherited file permissions, and network access
+// are NOT contained by this. Never use this to test writes or real credentials.
+export function isolatedEnvironment(root){
+  const systemRoot=process.env.SystemRoot||process.env.WINDIR;
+  const profile=join(root,'profile');
+  const env={
+    SystemRoot:systemRoot,
+    WINDIR:systemRoot,
+    ComSpec:join(systemRoot||'C:\\Windows','System32','cmd.exe'),
+    PATHEXT:'.COM;.EXE;.BAT;.CMD',
+    // Do not inherit the user's PATH, proxy variables, credentials, or home.
+    Path:systemRoot?[join(systemRoot,'System32'),systemRoot].join(';'):'',
+    HOME:profile,
+    USERPROFILE:profile,
+    APPDATA:join(profile,'AppData','Roaming'),
+    LOCALAPPDATA:join(profile,'AppData','Local'),
+    PROGRAMDATA:join(profile,'ProgramData'),
+    TEMP:join(profile,'Temp'),
+    TMP:join(profile,'Temp'),
+    CODEX_HOME:join(root,'codex-home'),
+    CODEX_SQLITE_HOME:join(root,'codex-sqlite'),
+    // Verified against Codex v0.164.0 startup: prevents persisted remote
+    // control from activating in this child. This is not an OS sandbox.
+    CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED:'1'
+  };
   return env;
 }
 
@@ -76,7 +133,7 @@ function numericVersion(cli,env,cwd){
   });
   const match=/^codex-cli\s+(\d+\.\d+\.\d+)\s*$/m.exec(checked.stdout||'');
   if(checked.status!==0||!match)stop('VERSION_UNAVAILABLE');
-  if(match[1]!==expectedVersion)stop('VERSION_CHANGED');
+  if(!supportedReadOnlyVersions.includes(match[1]))stop('VERSION_CHANGED');
   return match[1];
 }
 
@@ -94,14 +151,15 @@ async function main(){
     const env=isolatedEnvironment(root);
     const version=numericVersion(cli,env,cwd);
     client=new AppServerClient({command:cli,args:['app-server'],cwd,env,timeoutMs:12000});
-    await readOnlyHandshake(client);
+    await readOnlyHandshake(client,{allowDisabledRemoteStatus:version==='0.164.0'});
     console.log(`READONLY_OK: initialize and empty thread/list; CLI ${version}.`);
   }catch(error){
     const known=new Set(['WINDOWS_REQUIRED','APPROVAL_REQUIRED','MISSING_ARGUMENT',
       'CLI_PATH_REJECTED','PREPARATION_NOT_READY','VERSION_UNAVAILABLE',
       'VERSION_CHANGED','MALFORMED_RESPONSE','NONEMPTY_STATE','UNEXPECTED_EVENT',
-      'CONFIG_WARNING','SERVER_WARNING','ACCOUNT_EVENT','REMOTE_CONTROL_STATUS',
-      'CLIENT_WARNING']);
+      'CONFIG_WARNING','CONFIG_INVALID_DEFAULTS','CONFIG_SQLITE_RECOVERY',
+      'CONFIG_EXEC_POLICY','CONFIG_UNTRUSTED_PROJECT','SERVER_WARNING',
+      'ACCOUNT_EVENT','REMOTE_CONTROL_STATUS','CLIENT_WARNING']);
     const category=known.has(error.code)?error.code:
       /timeout|タイムアウト/i.test(error.message||'')?'TIMEOUT':'RPC_OR_LAUNCH_ERROR';
     console.error(`READONLY_STOP: ${category}. No raw response was recorded.`);

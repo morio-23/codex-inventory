@@ -45,7 +45,9 @@ try {
     if (Test-Path -LiteralPath $target) { throw 'ALREADY_EXISTS' }
     [void][IO.Directory]::CreateDirectory($target)
     [IO.File]::WriteAllText($marker,$markerText,[Text.Encoding]::ASCII)
-    foreach ($folder in @('codex-home','codex-sqlite','workspace-a','workspace-b','electron-user-data')) {
+    foreach ($folder in @('codex-home','codex-sqlite','workspace-a','workspace-b','electron-user-data',
+      'profile','profile\AppData','profile\AppData\Roaming','profile\AppData\Local',
+      'profile\ProgramData','profile\Temp')) {
       [void][IO.Directory]::CreateDirectory((Join-Path $target $folder))
     }
     [IO.File]::WriteAllText((Join-Path $target 'codex-home\config.toml'),$configText,[Text.Encoding]::ASCII)
@@ -71,6 +73,9 @@ try {
       'codex-home'='Directory'; 'codex-sqlite'='Directory';
       'workspace-a'='Directory'; 'workspace-b'='Directory';
       'electron-user-data'='Directory';
+      'profile'='Directory'; 'profile\AppData'='Directory';
+      'profile\AppData\Roaming'='Directory'; 'profile\AppData\Local'='Directory';
+      'profile\ProgramData'='Directory'; 'profile\Temp'='Directory';
       'codex-home\config.toml'='File';
       'workspace-a\README.txt'='File'; 'workspace-b\README.txt'='File';
       '.inventory-v07-smoke-marker'='File'
