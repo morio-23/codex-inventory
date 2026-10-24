@@ -78,7 +78,7 @@ test('public v0.144.6 config warning categories use exact known summaries only',
     ['Invalid configuration; using defaults.','CONFIG_INVALID_DEFAULTS'],
     ['Codex rebuilt its local database.','CONFIG_SQLITE_RECOVERY'],
     ['Error parsing rules; custom rules not applied.','CONFIG_EXEC_POLICY'],
-    ['Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\\n    1. SYNTHETIC_TEST_FOLDER','CONFIG_UNTRUSTED_PROJECT'],
+    ['Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\n    1. SYNTHETIC_TEST_FOLDER','CONFIG_UNTRUSTED_PROJECT'],
     ['Unrecognized warning for SYNTHETIC_TEST_FOLDER','CONFIG_WARNING'],
     ['Invalid configuration; using defaults. additional text','CONFIG_WARNING'],
   ];
