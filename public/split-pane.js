@@ -322,7 +322,7 @@ export class SplitPane {
       if(response.thread&&!this.threads.some(x=>x.id===response.thread.id)){
         this.threads.unshift(response.thread);
         const option=document.createElement('option');option.value=response.thread.id;
-        option.textContent=this.shortLabel(response.thread,0);
+        option.dataset.i18nIgnore='';option.textContent=this.shortLabel(response.thread,0);
         this.threadSelect.append(option);
       }
       await this.selectThread(response.thread.id);
