@@ -326,7 +326,7 @@ if(process.env.CODEX_NO_LISTEN!=='1' && process.argv[1] && resolve(process.argv[
     }
   });
   httpServer.listen(port,host,()=>{
-    console.log(`Codex Inventory v0.6: http://${host}:${port}\nMode: ${workspace?'固定 '+workspace:'自動検出（Codex App Server履歴）'}\nBackend: Codex App Server`);
+    console.log(`Codex Inventory v0.7.0-beta.1: http://${host}:${port}\nMode: ${workspace?'固定 '+workspace:'自動検出（Codex App Server履歴）'}\nBackend: Codex App Server`);
     service.start().catch(error=>console.error('Codex App Server:',error.message));
   });
 }
