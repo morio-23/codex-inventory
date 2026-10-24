@@ -465,6 +465,11 @@ async function selectThread(id){
       else history.push(message);
     }
     logs.set(id,history);
+    if(displayLabels.rememberHistoryTitle(id,history)){
+      $('active-thread').textContent=displayLabels.threadLabel(id,getLanguage());
+      drawThreads();
+      void splitPane?.refreshThreads();
+    }
     drawLog();
   }catch(e){notify('履歴を取得できません',true);}
 }
