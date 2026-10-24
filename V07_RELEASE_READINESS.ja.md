@@ -45,6 +45,8 @@ main
 | CI-11 | 日英リリースノート・導入説明 | ○ | 未検証をPASSと誤表記しない | 下書き準備 |
 | CI-12 | main統合・タグ・GitHub Releases | ×（ゲート承認後のみ） | 配布物、公開URL、checksumの照合 | 未実施 |
 
+**ローカルWindows配布候補のビルド手順:** [v0.7.0-beta.1 ローカルEXE検証](V07_LOCAL_BUILD_READINESS.ja.md)。実Codexの推論・承認・Setupインストールは行わず、未公開のSetup/Portableを生成してハッシュ・モック動作を確認する。
+
 ## 4. 次にPCで実施する項目（手作業 / 自動では実行しない）
 
 1. 新しい使い捨てWindows VMを用意し、**ホストの認証・履歴・クラウド同期・共有フォルダーを持ち込まない**。Windows 11 Home上でSandbox非対応の場合は、既存のホスト設定に手を加えず別VMを使う。詳細は [V07_SMOKE_ISOLATION.ja.md](V07_SMOKE_ISOLATION.ja.md)。

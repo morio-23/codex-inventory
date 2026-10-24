@@ -41,6 +41,8 @@ Review the cumulative single diff against the **current** main head before any e
 
 Local commands once Windows is available: `npm ci`, `npx playwright install chromium`, `npm run check`, `npm test`, `npm run test:e2e`, `git diff --check`, `node scripts/audit-v07-diff.mjs main`, `powershell -ExecutionPolicy Bypass -File scripts/audit-public-source.ps1`, and the Windows release verifier. Use [the disposable isolation procedure](V07_SMOKE_ISOLATION.ja.md) for real Codex tests; opt-in real inference and each permission-sensitive step require explicit approval. Do not copy real credentials, logs, local paths or chat content into a PR.
 
+**Unpublished Windows build guide:** [v0.7.0-beta.1 local EXE verification](V07_LOCAL_BUILD_READINESS.md). The guide builds and verifies local Setup and Portable binaries without real Codex inference, installing Setup, GitHub Actions, or publishing a release.
+
 ## Go / No-Go
 
 **Current decision: NO-GO for a v0.7 EXE release.** The real App Server check is incomplete; real approvals, Windows binary builds, packaged dependency licensing, notifications, VM acceptance and signing policy remain gates.

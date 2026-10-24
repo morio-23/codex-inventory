@@ -12,6 +12,8 @@ Set-Location -LiteralPath $repo
 if ($env:OS -ne 'Windows_NT') {
   throw 'This release verification script requires Windows.'
 }
+node (Join-Path $repo 'scripts/check-build-version.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Release version preflight failed.' }
 
 $results = [System.Collections.Generic.List[object]]::new()
 $start = Get-Date
@@ -54,6 +56,10 @@ try {
       if (-not $?) { throw 'Windows EXE build script failed.' }
     }
     $buildSucceeded = $true
+    Invoke-Phase 'Setup + Portable SHA256 and artifact integrity' {
+      & (Join-Path $repo 'scripts/verify-local-build.ps1')
+      if (-not $?) { throw 'Local artifact manifest validation failed.' }
+    }
     if (-not $SkipPortableSmoke) {
       Invoke-Phase 'Isolated mock Portable EXE smoke' {
         $version=(Get-Content -LiteralPath (Join-Path $repo 'desktop/package.json') -Raw | ConvertFrom-Json).version
