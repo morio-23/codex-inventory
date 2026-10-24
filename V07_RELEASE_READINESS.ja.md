@@ -1,5 +1,5 @@
 # Codex Inventory v0.7.0-beta.1 — リリース準備・判定（作業用）
-  
+
 > **作業用 / 未承認** — 2026-10-23 JST。これはチェックリストであり、テストの実行記録や配布許可ではありません。GitHub Actions、mainへのマージ、EXE公開は実施しないでください。English: [V07_RELEASE_READINESS.md](V07_RELEASE_READINESS.md)。
 
 ## 1. 現状と事実
