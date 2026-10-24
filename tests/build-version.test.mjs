@@ -15,7 +15,9 @@ const example=()=>({
     portable:{artifactName:'CodexInventory-Portable-${version}-${arch}.${ext}'}
   }},
   desktopLock:{version:'0.7.0-beta.1',packages:{'':{name:'codex-inventory-desktop',version:'0.7.0-beta.1'}}},
-  appServerSource:"clientInfo:{version:'0.7.0-beta.1'}"
+  appServerSource:"clientInfo:{version:'0.7.0-beta.1'}",
+  htmlSource:'LOCAL CODEX CONTROLLER / V0.7.0-BETA.1',
+  serverSource:'Codex Inventory v0.7.0-beta.1: http://127.0.0.1'
 });
 
 test('version preflight rejects root and desktop disagreement',()=>{
@@ -47,4 +49,12 @@ test('preflight rejects stale App Server wire client version',()=>{
   const p=example();
   p.appServerSource="clientInfo:{version:'0.6.0'}";
   assert.throws(()=>validateLocalBuildVersion(p),/BUILD_RPC_CLIENT_VERSION_MISMATCH/);
+});
+
+test('preflight rejects misleading UI and server version badges',()=>{
+  for(const field of ['htmlSource','serverSource']){
+    const p=example();
+    p[field]=p[field].replaceAll('0.7.0-BETA.1','0.6').replaceAll('0.7.0-beta.1','0.6');
+    assert.throws(()=>validateLocalBuildVersion(p),/BUILD_VISIBLE_VERSION_MISMATCH/);
+  }
 });
