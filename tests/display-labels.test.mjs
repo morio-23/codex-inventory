@@ -2,16 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DisplayLabels } from '../public/display-labels.js';
 
-test('project labels are anonymous and retain their numbers across locale changes', () => {
-  const labels = new DisplayLabels();
-  const first = 'C:\\synthetic\\private-project-alpha';
-  const second = '/synthetic/private-project-beta';
+test('project labels use only the directory basename, not a private path',()=>{
+  const labels=new DisplayLabels();
+  const windows='C:\\Users\\synthetic\\CodexWorkSpace\\oshiport';
+  const unix='/home/synthetic/work/knowledgehub';
+  assert.equal(labels.projectLabel(windows,'ja'),'oshiport');
+  assert.equal(labels.projectLabel(windows+'\\','en'),'oshiport');
+  assert.equal(labels.projectLabel(unix,'en-US'),'knowledgehub');
+  assert.equal(labels.projectLabel(unix,'ja'),'knowledgehub');
+  assert.ok(!labels.projectLabel(windows).includes('Users'));
+});
 
-  assert.equal(labels.projectLabel(first, 'ja'), 'プロジェクト1');
-  assert.equal(labels.projectLabel(second, 'ja'), 'プロジェクト2');
-  assert.equal(labels.projectLabel(first, 'en'), 'Project 1');
-  assert.equal(labels.projectLabel(second, 'en-US'), 'Project 2');
-  assert.equal(labels.projectLabel(first), 'プロジェクト1');
+test('duplicate project basenames are disambiguated without revealing parents',()=>{
+  const labels=new DisplayLabels();
+  assert.equal(labels.projectLabel('C:\\first\\same'),'same');
+  assert.equal(labels.projectLabel('D:\\second\\same'),'same (2)');
+  assert.equal(labels.projectLabel('/third/SAME'),'SAME (3)');
+  assert.equal(labels.projectLabel('C:\\first\\same'),'same');
+});
+
+test('invalid, root and control-character project folders have safe display labels',()=>{
+  const labels=new DisplayLabels();
+  assert.equal(labels.projectLabel('C:\\'),'プロジェクト1');
+  assert.equal(labels.projectLabel('','en'),'Project 2');
+  assert.equal(labels.projectLabel('C:\\synthetic\\test\u202e name'),'test name');
+  assert.equal(labels.projectLabel('/synthetic/work/.','ja'),'プロジェクト3');
 });
 
 test('thread labels are anonymous, stable, and numbered separately from projects', () => {
