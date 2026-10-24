@@ -56,6 +56,10 @@ try {
       if (-not $?) { throw 'Windows EXE build script failed.' }
     }
     $buildSucceeded = $true
+    Invoke-Phase 'Setup + Portable SHA256 and artifact integrity' {
+      & (Join-Path $repo 'scripts/verify-local-build.ps1')
+      if (-not $?) { throw 'Local artifact manifest validation failed.' }
+    }
     if (-not $SkipPortableSmoke) {
       Invoke-Phase 'Isolated mock Portable EXE smoke' {
         $version=(Get-Content -LiteralPath (Join-Path $repo 'desktop/package.json') -Raw | ConvertFrom-Json).version
