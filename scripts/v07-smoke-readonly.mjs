@@ -67,15 +67,30 @@ function argumentsFrom(argv){
   return {root:argv[rootIndex+1],cli:argv[cliIndex+1]};
 }
 
-function isolatedEnvironment(root){
-  const env={};
-  for(const name of ['SystemRoot','WINDIR','ComSpec','PATHEXT','TEMP','TMP',
-    'USERPROFILE','APPDATA','LOCALAPPDATA','PROGRAMDATA']){
-    if(process.env[name])env[name]=process.env[name];
-  }
-  env.Path=process.env.Path||process.env.PATH||'';
-  env.CODEX_HOME=join(root,'codex-home');
-  env.CODEX_SQLITE_HOME=join(root,'codex-sqlite');
+// Partial containment for a user-approved read-only test on the existing host.
+// Environment variables are redirected to synthetic folders; Windows identity,
+// OS APIs, system-wide config, inherited file permissions, and network access
+// are NOT contained by this. Never use this to test writes or real credentials.
+export function isolatedEnvironment(root){
+  const systemRoot=process.env.SystemRoot||process.env.WINDIR;
+  const profile=join(root,'profile');
+  const env={
+    SystemRoot:systemRoot,
+    WINDIR:systemRoot,
+    ComSpec:join(systemRoot||'C:\\Windows','System32','cmd.exe'),
+    PATHEXT:'.COM;.EXE;.BAT;.CMD',
+    // Do not inherit the user's PATH, proxy variables, credentials, or home.
+    Path:systemRoot?[join(systemRoot,'System32'),systemRoot].join(';'):'',
+    HOME:profile,
+    USERPROFILE:profile,
+    APPDATA:join(profile,'AppData','Roaming'),
+    LOCALAPPDATA:join(profile,'AppData','Local'),
+    PROGRAMDATA:join(profile,'ProgramData'),
+    TEMP:join(profile,'Temp'),
+    TMP:join(profile,'Temp'),
+    CODEX_HOME:join(root,'codex-home'),
+    CODEX_SQLITE_HOME:join(root,'codex-sqlite')
+  };
   return env;
 }
 
