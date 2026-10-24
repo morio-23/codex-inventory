@@ -21,7 +21,7 @@
 ## Windows端末だけで先に実施できる確認（**実Codexを起動しない**）
 
 ```powershell
-git fetch origin codex/v07-config-warning-triage-20261024
+git fetch origin
 git switch -c codex/v07-config-warning-triage-20261024 --track origin/codex/v07-config-warning-triage-20261024
 npm run check
 node --test tests/v07-smoke-readonly.test.mjs
