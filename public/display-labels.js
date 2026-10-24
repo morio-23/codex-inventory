@@ -2,11 +2,25 @@
 // thread names or previews into localStorage, diagnostics, or telemetry.
 export class DisplayLabels {
   #projects = new Map();
+  #projectFallbacks = new Map();
   #threads = new Map();
   #threadTitles = new Map();
 
   projectLabel(cwd, locale = 'ja') {
-    return this.#label(this.#projects, cwd, locale, 'プロジェクト', 'Project ');
+    // Show only the final directory component, never the parent path or drive.
+    // The full path remains the internal workspace identifier.
+    const path=typeof cwd==='string'?cwd.trim():'';
+    const last=path.replace(/[\\/]+$/g,'').split(/[\\/]/).at(-1);
+    const title=this.#cleanTitle(last);
+    if (!title || title==='.' || title==='..' || /^[A-Za-z]:$/.test(title)) {
+      return this.#label(this.#projectFallbacks, cwd, locale, 'プロジェクト', 'Project ');
+    }
+    if (!this.#projects.has(cwd)) {
+      const normalized=title.toLocaleLowerCase();
+      const matching=[...this.#projects.values()].filter(p=>p.normalized===normalized).length;
+      this.#projects.set(cwd,{label:matching?title+' ('+(matching+1)+')':title,normalized});
+    }
+    return this.#projects.get(cwd).label;
   }
 
   // The Codex App Server Thread.name is an optional user-facing title;
