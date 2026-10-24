@@ -1924,3 +1924,25 @@ test('official Codex conversation title outranks preview in primary and split hi
   await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
 });
 
+
+test('legacy Codex thread without summary shows first stored user request (@mock)',async({page})=>{
+  box=await seededProjects();
+  const snapshot=JSON.parse(await readFile(box.store,'utf8'));
+  const beta=snapshot.threads.find(row=>row.id==='mock-beta-auto');
+  beta.name=null;
+  beta.preview='';
+  await writeFile(box.store,JSON.stringify(snapshot));
+  const {url}=await box.start({CODEX_WORKSPACE:''});
+  // Start loads the stored mock history with no list/read metadata title.
+  // No turn/start, model inference or real user profile is used.
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#active-thread')).toHaveText('Open Beta project');
+  await expect(page.locator('.thread-item[data-thread-id="mock-beta-auto"] .thread-name'))
+    .toHaveText('Open Beta project');
+  await page.locator('#split-toggle').click();
+  await expect(page.locator('#secondary-thread option[value="mock-beta-auto"]'))
+    .toHaveText('Open Beta project');
+  await page.reload();
+  await expect(page.locator('#active-thread')).toHaveText('Open Beta project');
+});
