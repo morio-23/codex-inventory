@@ -10,6 +10,9 @@ Set-Location $repo
 if ($env:OS -ne 'Windows_NT') {
   throw 'Windows向けEXEビルドはWindows環境で実行してください。'
 }
+Write-Host '[preflight] v0.7 prerelease version and targets'
+node (Join-Path $repo 'scripts/check-build-version.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Release version preflight failed; no EXEs were built.' }
 if (-not $SkipTests) {
   Write-Host '[1/4] Node tests'
   npm ci
@@ -23,13 +26,11 @@ if (-not $SkipTests) {
 }
 Set-Location (Join-Path $repo 'desktop')
 Write-Host '[2/4] Desktop dependencies'
-if (Test-Path 'package-lock.json') {
-  npm ci
-} else {
-  Write-Warning 'desktop/package-lock.json not found. Run npm install and commit the generated lock before distributing.'
-  npm install
+if (-not (Test-Path -LiteralPath 'package-lock.json')) {
+  throw 'desktop/package-lock.json missing: release builds require a committed lockfile'
 }
-if ($LASTEXITCODE -ne 0) { throw 'Desktop npm install failed' }
+npm ci
+if ($LASTEXITCODE -ne 0) { throw 'Desktop npm ci failed' }
 $buildStartedAt=(Get-Date).ToUniversalTime()
 Write-Host '[3/4] Build Windows EXE'
 if ($PortableOnly) {
@@ -64,6 +65,9 @@ if ($RequireSigned -and ($signatures | Where-Object { $_.Status -ne 'Valid' })) 
 }
 $manifest = $artifacts | Get-FileHash -Algorithm SHA256 | Select-Object Hash, Path
 $manifest | Format-Table -AutoSize
-$manifest | ForEach-Object { "$($_.Hash)  $(Split-Path $_.Path -Leaf)" } |
-  Set-Content -Path 'dist/SHA256SUMS.txt' -Encoding utf8
+$manifestLines=@($manifest | ForEach-Object { "$($_.Hash)  $(Split-Path $_.Path -Leaf)" })
+# Windows PowerShell 5.1 defaults to a UTF-8 BOM; sha256sum manifests should
+# be portable, plain UTF-8 with no BOM and only this build's expected EXEs.
+[IO.File]::WriteAllLines((Join-Path $repo 'dist/SHA256SUMS.txt'),
+  $manifestLines,[Text.UTF8Encoding]::new($false))
 Write-Host "Built $($artifacts.Count) EXE file(s) in dist"
