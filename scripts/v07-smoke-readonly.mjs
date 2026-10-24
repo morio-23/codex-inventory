@@ -46,6 +46,10 @@ export async function readOnlyHandshake(client){
   client.on?.('warning',flagWarning);
   try{
     await client.start();
+    // App Server can queue startup notifications just after the initialize
+    // response. Give the warning handler a bounded chance to receive them
+    // before even asking for an empty thread list. Not an OS isolation barrier.
+    await new Promise(resolve=>setTimeout(resolve,300));
     if(unexpectedCode)stop(unexpectedCode);
     const response=await client.request('thread/list',{});
     if(unexpectedCode)stop(unexpectedCode);
