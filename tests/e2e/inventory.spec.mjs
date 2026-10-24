@@ -786,11 +786,11 @@ test('without -Workspace, Inventory discovers App Server projects and changes ac
   await expect(page.locator('#project-select')).toBeEnabled();
   await expect(page.locator('#project-select option')).toHaveCount(2);
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('beta');
   const betaLabel=await page.locator('#workspace').textContent();
   await expect(page.locator('#log')).toContainText('ANSWER_BETA');
   await page.locator('#project-select').selectOption(box.alpha);
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('alpha');
   expect(await page.locator('#workspace').textContent()).not.toBe(betaLabel);
   await expect(page.locator('#log')).toContainText('ANSWER_ALPHA');
   await expect(page.locator('#log')).not.toContainText('ANSWER_BETA');
@@ -1153,7 +1153,7 @@ test('Unicode project paths can fetch history, create and resume a mock Codex tu
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
 
   await page.locator('#project-select').selectOption(box.alpha);
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('日本語 🌸 100% workspace');
   await expect(page.locator('#log')).toContainText('ANSWER_ALPHA');
   const thread=await createChat(page);
   await runPrompt(page,'Unicode workspace mock run');
@@ -1732,22 +1732,27 @@ test('workspace conflict warning uses safe thread titles and clears automaticall
   await expect(warning).toBeHidden({timeout:15000});
 });
 
-test('project paths stay anonymous while chat previews are visible (@mock)',async({page})=>{
+test('project folder names display while parent paths stay private (@mock)',async({page})=>{
   box=await seededProjects();const {url}=await box.start({CODEX_WORKSPACE:''});
   await page.goto(url);
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('beta');
   await expect(page.locator('#active-thread')).toHaveText('Beta project');
   for(const selector of ['#workspace','#project-select','#project-hint','#thread-list','#active-thread']){
-    const text=await page.locator(selector).textContent();
-    expect(text).not.toContain('alpha');
-    expect(text).not.toContain('beta');
-    expect(text).not.toContain('ANSWER_');
-    expect(text).not.toContain(box.alpha);
-    expect(text).not.toContain(box.beta);
+    const value=await page.locator(selector).textContent();
+    expect(value).not.toContain('ANSWER_');
+    expect(value).not.toContain(box.alpha);
+    expect(value).not.toContain(box.beta);
   }
   const options=await page.locator('#project-select option').evaluateAll(nodes=>nodes.map(node=>node.title));
-  expect(options.every(title=>/^プロジェクト\d+$/.test(title))).toBe(true);
+  expect(options).toEqual(expect.arrayContaining(['alpha','beta']));
+  await page.locator('#project-select').selectOption(box.alpha);
+  await expect(page.locator('#workspace')).toHaveText('alpha');
+  await page.locator('#ui-language').selectOption('en');
+  await expect(page.locator('#workspace')).toHaveText('alpha');
+  await expect(page.locator('#project-select option')).toContainText(['alpha · 1 chats','beta · 1 chats']);
+  await page.reload();
+  await expect(page.locator('#workspace')).toHaveText('alpha');
   const chatTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
   expect(chatTitles).toContain('Beta project');
   expect(chatTitles.every(title=>title==='Alpha project'||title==='Beta project')).toBe(true);
