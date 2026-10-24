@@ -18,10 +18,30 @@ export class DisplayLabels {
     if (isThread && typeof id === 'string') {
       const name = this.#cleanTitle(threadOrId.name);
       const preview = this.#cleanTitle(threadOrId.preview, true);
-      this.#threadTitles.set(id, name || preview || null);
+      // Empty list/read fields must not discard a previously observed title.
+      // An explicit name always wins; preview wins over a history fallback.
+      const current = this.#threadTitles.get(id);
+      if (name) this.#threadTitles.set(id, {value:name,priority:3});
+      else if (preview && (!current || current.priority <= 2))
+        this.#threadTitles.set(id, {value:preview,priority:2});
     }
-    return this.#threadTitles.get(id) ||
+    return this.#threadTitles.get(id)?.value ||
       this.#label(this.#threads, id, locale, 'チャット', 'Chat ');
+  }
+
+  // Older Codex threads may have no summary in thread/list or thread/read,
+  // even though their saved turns contain a user message. This is a display-
+  // only fallback after a normal read; never mutate the persisted session.
+  rememberHistoryTitle(id, messages) {
+    if (typeof id !== 'string' || this.#threadTitles.has(id) ||
+        !Array.isArray(messages)) return false;
+    const firstUser = messages.find(item =>
+      item?.role === 'user' && typeof item.text === 'string' &&
+      this.#cleanTitle(item.text, true));
+    if (!firstUser) return false;
+    const title = this.#cleanTitle(firstUser.text, true);
+    this.#threadTitles.set(id, {value:title,priority:1});
+    return true;
   }
 
   #cleanTitle(value, preview = false) {
