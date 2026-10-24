@@ -44,14 +44,69 @@ node scripts/audit-v07-diff.mjs main
 
 ### ホスト上の読取専用App Server段階1（合成テスト合格後のみ）
 
-現在のPowerShellウィンドウを使用し、OSや既存Codexユーザープロファイルを変更しない。CLIを自動更新・ダウングレードしない。スクリプトはCLI版`0.144.6`以外を拒否する。
+現在のPowerShellウィンドウを使用し、OSや既存Codexユーザープロファイルを変更しない。CLIを自動更新・ダウングレードしない。2026-10-24に公式 `rust-v0.144.5` / `rust-v0.144.6` の `initialize_processor.rs`、`ConfigWarningNotification` の型と起動時警告発生源が同一であることを比較し、この**読取専用段階1だけ** `0.144.5` と `0.144.6` を許可した。その他の実Codex互換性やアカウント利用を保証しない。`npm root --global` の全件検索では異なるアーキテクチャや依存パッケージの `codex.exe` が複数出るため、候補総数を1件に限定しない。**Windows x64対応の公式ベンダー配置に一致する候補だけを一意選択**し、不明なら停止する。
 
 ```powershell
 $globalRoot = npm root --global
 $cliCandidates = @(Get-ChildItem -LiteralPath $globalRoot -Filter codex.exe -File -Recurse -ErrorAction SilentlyContinue)
-if ($cliCandidates.Count -ne 1) { throw 'Standalone codex.exe must be uniquely identified; stop here.' }
-$smokeCli = $cliCandidates[0].FullName
-if ((& $smokeCli --version) -ne 'codex-cli 0.144.6') { throw 'CLI version mismatch; stop here.' }
+# Codex v0.144.5の公式npm起動ラッパーで採用されるWindows x64配置のみを選ぶ
+$nativeCandidates = @($cliCandidates | Where-Object {
+  $_.FullName -match '\\vendor\\x86_64-pc-windows-msvc\\bin\\codex\\.exe
+
+$smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ('codex-inventory-v07-smoke-' + [Guid]::NewGuid().ToString('N'))
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Prepare -Root $smokeRoot
+if ($LASTEXITCODE -ne 0) { throw 'Prepare failed.' }
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Verify -Root $smokeRoot
+if ($LASTEXITCODE -ne 0) { throw 'Verify failed.' }
+
+# 段階1だけ。ホストがオンラインの場合、同じユーザーの権限で
+# ネットワークを利用する可能性がある。可能なら手動で一時的にオフラインにする。
+node .\scripts\v07-smoke-readonly.mjs --root $smokeRoot --cli $smokeCli --approved-readonly-app-server
+
+# 結果を記録し終えてから合成一時ルートだけ削除
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Cleanup -Root $smokeRoot -ConfirmCleanup
+```
+
+スクリプトの`READONLY_OK`または`READONLY_STOP: 固定分類`のみ共有。内部パス、生ログ、stderrや警告本文を共有しない。上記以外のコマンドを手探りで追加実行せず、一度停止して原因を整理する。
+
+**公開ゲート上の扱い：** 同一ホストの段階1が成功しても、OSレベルの隔離確認、実ターン・承認・復帰、Setup/Portableの別環境動作検証が未完了ならv0.7の配布可否はなお未決定。「VM検証済み」とは記載しない。
+
+## Windows端末だけで先に実施できる確認（**実Codexを起動しない**）
+
+```powershell
+git fetch origin
+git switch -c codex/v07-config-warning-triage-20261024 --track origin/codex/v07-config-warning-triage-20261024
+npm run check
+node --test tests/v07-smoke-readonly.test.mjs
+npm test
+git fetch origin main
+git diff --check origin/main...HEAD
+node scripts/audit-v07-diff.mjs main
+```
+
+実際に検証したSHA、NodeテストのPASS/FAIL/SKIP、差分監査のPASS/FAILだけを記録する。新しいコードはこの時点では未検証であるため、過去の`c523803`のPASSを流用しない。
+
+## 実接続の再試験（必ず使い捨てWindows VM）
+
+以前の同一ホスト上の一時`CODEX_HOME`は、OS全体・認証や設定レイヤーからの完全隔離を保証しない。**ホストの普段のCodex、実チャット、CLI状態を使って再実行しない。**
+
+1. [既存の隔離手順](V07_SMOKE_ISOLATION.ja.md)に従って新しいVMを準備。ホストとの共有、同期、既存認証をなくし、対象CLI版を固定。
+2. VM内でこの診断ブランチのコミットを取得してSHA照合。合成`codex-home`と作業フォルダをPrepare→Verifyし`READY`を確認。
+3. VMのネットワークを遮断し、段階1の読取専用App Server接続だけを明示的に実行。成功なら`READONLY_OK`、警告が出れば`READONLY_STOP: CONFIG_...`の**コードのみ**記録。失敗したら進まず後片付け。
+4. 分類結果によって、影響する隔離VM内の設定レイヤー・SQLite・exec policy・プロジェクト信頼設定を確認。原因が解決するまで警告を無視して進まない。Unknown時は実行対象CLI版・起動手順の公式ソースをさらに照合する。
+5. 読取成功後も、推論・承認・ファイル操作・切断・再接続は別段階。費用・権限を含む各操作を個別に承認してから進む。
+
+**現在の判定：NO-GO。** `CONFIG_WARNING` の原因特定・実機の修正結果、実ターン/承認/再接続、EXEビルド/Windows VM受け入れは未完了。Draft PR・main不変更・GitHub Actions不実行を維持する。
+
+})
+if ($nativeCandidates.Count -ne 1) {
+  throw 'Windows x64 native Codex candidate is not unique; stop here.'
+}
+$smokeCli = $nativeCandidates[0].FullName
+$smokeVersion = & $smokeCli --version
+if ($smokeVersion -notin @('codex-cli 0.144.5','codex-cli 0.144.6')) {
+  throw 'CLI version not audited for this read-only smoke; stop here.'
+}
 
 $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ('codex-inventory-v07-smoke-' + [Guid]::NewGuid().ToString('N'))
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Prepare -Root $smokeRoot
