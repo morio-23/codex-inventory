@@ -33,15 +33,28 @@ export function classifyStartupConfigWarning(params){
 }
 
 /** Only request metadata from a newly empty synthetic Codex home. */
-export async function readOnlyHandshake(client){
+// v0.164.0 sends this notification after initialize for every new connection.
+// Only the explicit disabled state with no environment is expected in the
+// diagnostic. Never copy serverName/installationId into diagnostics.
+export function isDisabledRemoteControlStatus(params){
+  return params?.status==='disabled' && params?.environmentId===null &&
+    typeof params?.serverName==='string' &&
+    typeof params?.installationId==='string';
+}
+
+export async function readOnlyHandshake(client,{allowDisabledRemoteStatus=false}={}){
   let unexpectedCode;
   const flagNotification=notification=>{
-    // Record only a fixed category; params may contain paths or account details.
+    // Record only fixed categories; remote identity/paths must not be logged.
     switch(notification?.method){
       case 'configWarning': unexpectedCode ??= classifyStartupConfigWarning(notification?.params);break;
       case 'warning': unexpectedCode ??= 'SERVER_WARNING';break;
       case 'account/updated': unexpectedCode ??= 'ACCOUNT_EVENT';break;
-      case 'remoteControl/status/changed': unexpectedCode ??= 'REMOTE_CONTROL_STATUS';break;
+      case 'remoteControl/status/changed':
+        if(!allowDisabledRemoteStatus ||
+          !isDisabledRemoteControlStatus(notification?.params))
+          unexpectedCode ??= 'REMOTE_CONTROL_STATUS';
+        break;
       default: unexpectedCode ??= 'UNEXPECTED_EVENT';
     }
   };
@@ -97,7 +110,10 @@ export function isolatedEnvironment(root){
     TEMP:join(profile,'Temp'),
     TMP:join(profile,'Temp'),
     CODEX_HOME:join(root,'codex-home'),
-    CODEX_SQLITE_HOME:join(root,'codex-sqlite')
+    CODEX_SQLITE_HOME:join(root,'codex-sqlite'),
+    // Verified against Codex v0.164.0 startup: prevents persisted remote
+    // control from activating in this child. This is not an OS sandbox.
+    CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED:'1'
   };
   return env;
 }
@@ -135,7 +151,7 @@ async function main(){
     const env=isolatedEnvironment(root);
     const version=numericVersion(cli,env,cwd);
     client=new AppServerClient({command:cli,args:['app-server'],cwd,env,timeoutMs:12000});
-    await readOnlyHandshake(client);
+    await readOnlyHandshake(client,{allowDisabledRemoteStatus:version==='0.164.0'});
     console.log(`READONLY_OK: initialize and empty thread/list; CLI ${version}.`);
   }catch(error){
     const known=new Set(['WINDOWS_REQUIRED','APPROVAL_REQUIRED','MISSING_ARGUMENT',
