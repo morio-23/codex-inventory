@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import {fileURLToPath} from 'node:url';
 import {AppServerClient} from '../app-server-client.mjs';
-import {readOnlyHandshake,classifyStartupConfigWarning,isolatedEnvironment} from '../scripts/v07-smoke-readonly.mjs';
+import {readOnlyHandshake,classifyStartupConfigWarning,isolatedEnvironment,supportedReadOnlyVersions} from '../scripts/v07-smoke-readonly.mjs';
 
 const fixture=fileURLToPath(new URL('./fixtures/mock-app-server.mjs',import.meta.url));
 const script=fileURLToPath(new URL('../scripts/v07-smoke-readonly.mjs',import.meta.url));
@@ -138,4 +138,12 @@ test('delayed startup warning is classified before any thread/list request',asyn
   fake.request=async()=>{requested=true;return {data:[]};};
   await assert.rejects(()=>readOnlyHandshake(fake),{code:'CONFIG_EXEC_POLICY'});
   assert.equal(requested,false);
+});
+
+test('only audited 0.144.5 and 0.144.6 are allowed for stage-one read-only diagnostics',()=>{
+  assert.deepEqual([...supportedReadOnlyVersions],['0.144.5','0.144.6']);
+  assert.equal(supportedReadOnlyVersions.includes('0.144.4'),false);
+  assert.equal(supportedReadOnlyVersions.includes('0.144.7'),false);
+  assert.equal(supportedReadOnlyVersions.includes('1.0.0'),false);
+  assert.ok(Object.isFrozen(supportedReadOnlyVersions));
 });
