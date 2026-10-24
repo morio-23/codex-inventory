@@ -53,3 +53,36 @@ test('titles strip non-printable and bidi controls and clip very long previews',
   assert.equal(shown,'a'.repeat(80)+'…');
   assert.ok(!shown.includes('synthetic-thread-private-alpha'));
 });
+
+test('legacy thread display title can be read from saved user turns with no metadata',()=>{
+  const labels=new DisplayLabels();
+  const thread={id:'synthetic-legacy-thread',name:null,preview:''};
+  assert.equal(labels.threadLabel(thread,'ja'),'チャット1');
+  assert.equal(labels.rememberHistoryTitle(thread.id,[
+    {role:'command',text:'SYNTHETIC_COMMAND'},
+    {role:'assistant',text:'SYNTHETIC_ANSWER'},
+    {role:'user',text:'  【ユーザー依頼】\\n リポジトリの構成を調べて   '}
+  ]),true);
+  assert.equal(labels.threadLabel(thread,'ja'),'リポジトリの構成を調べて');
+  assert.equal(labels.threadLabel(thread.id,'en'),'リポジトリの構成を調べて');
+  assert.equal(labels.rememberHistoryTitle(thread.id,[{role:'user',text:'Ignored later'}]),false);
+});
+
+test('metadata takes precedence over history, empty list refresh never erases name',()=>{
+  const labels=new DisplayLabels();
+  const thread={id:'synthetic-title',name:null,preview:''};
+  assert.equal(labels.rememberHistoryTitle(thread.id,[{role:'user',text:'Historical title'}]),true);
+  assert.equal(labels.threadLabel(thread),'Historical title');
+  assert.equal(labels.threadLabel({...thread,preview:'Preview title'}),'Preview title');
+  assert.equal(labels.threadLabel({...thread,name:'Official name'}),'Official name');
+  assert.equal(labels.threadLabel(thread),'Official name');
+  assert.equal(labels.threadLabel({...thread,preview:'Different preview'}),'Official name');
+});
+
+test('assistant-only and empty saved histories do not invent a chat name',()=>{
+  const labels=new DisplayLabels();
+  const id='synthetic-empty';
+  assert.equal(labels.rememberHistoryTitle(id,[]),false);
+  assert.equal(labels.rememberHistoryTitle(id,[{role:'assistant',text:'Never use as title'}]),false);
+  assert.equal(labels.threadLabel(id),'チャット1');
+});
