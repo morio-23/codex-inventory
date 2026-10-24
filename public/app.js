@@ -432,7 +432,7 @@ async function selectThread(id){
   if(id&&workspacePath&&sameWorkspaceUi(activeThreadCwd,workspacePath))
     try{localStorage.setItem(activeThreadStorageKey(),id);}catch(error){notify('選択チャットを保存できません',true);}
   if(isForeignThread())notify('別プロジェクトのチャットは閲覧専用です。プロジェクト選択から所属先に切り替えてください。',true);
-  $('active-thread').textContent=id?displayLabels.threadLabel(id,getLanguage()):t('新規チャット');
+  $('active-thread').textContent=id?displayLabels.threadLabel(threads.find(thread=>thread.id===id)||id,getLanguage()):t('新規チャット');
   $('prompt').value=draftPrompts.get(id)||'';
   $('prompt').dataset.suggested='no';
   updateSendPreview();
@@ -445,6 +445,13 @@ async function selectThread(id){
     const record=await api('/api/threads/'+encodeURIComponent(id));
     if(activeThreadId!==id)return;
     activeThreadCwd=record.thread?.cwd||activeThreadCwd;
+    const listed=threads.find(thread=>thread.id===id);
+    if(listed && record.thread){
+      listed.name=record.thread.name;
+      listed.preview=record.thread.preview;
+      $('active-thread').textContent=displayLabels.threadLabel(listed,getLanguage());
+      drawThreads();
+    }
     updateButtons();
     // Stored Codex turns are the source of truth on restart. Preserve any in-flight response.
     const history=(record.messages||[]).map(x=>({role:x.role,text:x.text,itemId:x.itemId||null}));
@@ -467,7 +474,7 @@ function drawThreads(){
   for(const thread of threads){
     const b=document.createElement('button');b.type='button';b.className='thread-item'+(thread.id===activeThreadId?' chosen':'');
     b.dataset.threadId=thread.id;
-    const name=document.createElement('span');name.className='thread-name';name.textContent=displayLabels.threadLabel(thread.id,getLanguage());
+    const name=document.createElement('span');name.className='thread-name';name.textContent=displayLabels.threadLabel(thread,getLanguage());
     const meta=document.createElement('small');meta.textContent=(workspacePath&&!sameWorkspaceUi(thread.cwd,workspacePath)?t('別ワールド・閲覧専用')+' · ':'')+(runningThreads.has(thread.id)?(getLanguage()==='en'?'● Running':'● 実行中')+' · ':'')+(thread.updatedAt?new Date(thread.updatedAt*1000).toLocaleString(getLocale()):t('履歴'));
     b.append(name,meta);b.title=name.textContent;b.addEventListener('click',()=>selectThread(thread.id));threadList.append(b);
   }
@@ -481,6 +488,7 @@ async function refreshThreads(){
     threads=result.threads||[];
     needsThreadRefresh=false;
     drawThreads();updateButtons();
+    if(activeThreadId)$('active-thread').textContent=displayLabels.threadLabel(threads.find(thread=>thread.id===activeThreadId)||activeThreadId,getLanguage());
     void splitPane?.refreshThreads();
     if(!activeThreadId && threads.length){
       let savedId=null;
@@ -1500,7 +1508,7 @@ async function boot(){
     api,post,notify,getLanguage,getLocale,
     getCatalog:()=>modelCatalog,
     getPrimaryThreadId:()=>activeThreadId,
-    labelThread:thread=>displayLabels.threadLabel(thread.id,getLanguage()),
+    labelThread:thread=>displayLabels.threadLabel(thread,getLanguage()),
     onVisibilityChange:()=>{renderActivityFeed();renderWorkspaceConflicts();},
     getRunning:()=>runningThreads,
     getTurnId:id=>runningTurnIds.get(id)||null,
