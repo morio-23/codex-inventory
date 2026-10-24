@@ -40,7 +40,7 @@ export const taskInstructions = {
 
 const clip = (value, max=1000) => typeof value==='string' ? value.slice(0,max) : '';
 export function simplifyThread(thread) {
-  return {id:thread.id,preview:thread.preview||'',cwd:thread.cwd||'',createdAt:thread.createdAt||0,updatedAt:thread.updatedAt||0,source:thread.source||null,status:thread.status||null};
+  return {id:thread.id,name:typeof thread.name==='string'?thread.name:null,preview:thread.preview||'',cwd:thread.cwd||'',createdAt:thread.createdAt||0,updatedAt:thread.updatedAt||0,source:thread.source||null,status:thread.status||null};
 }
 export function projectHistory(thread) {
   const output=[];
