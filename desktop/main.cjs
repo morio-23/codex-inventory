@@ -3,6 +3,7 @@ const {app,BrowserWindow,Notification,dialog,shell,session,ipcMain}=require('ele
 const {join}=require('node:path');
 const {tmpdir}=require('node:os');
 const {isolatedSmokeProfile}=require('./smoke-profile.cjs');
+const {RENDER_PROBE,classifyDocumentHealth,countVisualColorBuckets}=require('./window-health.cjs');
 const {readFile,writeFile,mkdir}=require('node:fs/promises');
 const {pathToFileURL}=require('node:url');
 
@@ -123,7 +124,6 @@ function openWindow(url){
       preload:join(__dirname,'preload.cjs'),
       nodeIntegration:false,
       contextIsolation:true,
-      // Keep App Server SSE callbacks responsive while the window is minimized.
       backgroundThrottling:false,
       sandbox:true,
       webSecurity:true,
@@ -131,16 +131,65 @@ function openWindow(url){
       allowRunningInsecureContent:false,
     }
   });
+  const win=mainWindow;
   const allowedOrigin=new URL(url).origin;
-  mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  mainWindow.webContents.on('will-navigate',(event,target)=>{
+  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  win.webContents.on('will-navigate',(event,target)=>{
     try{if(new URL(target).origin===allowedOrigin)return;}catch{}
     event.preventDefault();
   });
-  mainWindow.webContents.on('will-attach-webview',event=>event.preventDefault());
-  mainWindow.once('ready-to-show',()=>mainWindow.show());
-  mainWindow.on('closed',()=>{mainWindow=null;});
-  mainWindow.loadURL(url).catch(error=>dialog.showErrorBox(desktopText('画面を開けません','Could not open the window'),error.message));
+  win.webContents.on('will-attach-webview',event=>event.preventDefault());
+  win.once('ready-to-show',()=>{if(!win.isDestroyed())win.show();});
+  win.on('closed',()=>{if(mainWindow===win)mainWindow=null;});
+
+  // Previously the packaged smoke verified HTTP connectivity only: Electron
+  // could show a featureless #253028 window yet pass all release checks.
+  // Validate the actual DOM/CSS load and, in synthetic smoke, a non-uniform
+  // captured framebuffer before accepting the packaged GUI as working.
+  async function renderAndCheck(){
+    try{
+      await win.loadURL(url);
+      if(win.isDestroyed())return;
+      const health=await win.webContents.executeJavaScript(RENDER_PROBE,true);
+      const code=classifyDocumentHealth(health);
+      if(code!=='UI_READY')throw Object.assign(new Error(code),{code});
+      if(smokeProfile){
+        if(!win.isVisible())win.show();
+        await new Promise(resolve=>setTimeout(resolve,350));
+        if(win.isDestroyed())return;
+        const capture=await win.capturePage();
+        const size=capture.getSize();
+        const colors=countVisualColorBuckets(capture.toBitmap(),size.width,size.height);
+        if(colors<5)throw Object.assign(new Error('UI_BLANK_FRAME'),{code:'UI_BLANK_FRAME'});
+        await writeFile(join(app.getPath('userData'),'ui-smoke-ready.json'),
+          JSON.stringify({status:'UI_READY',painted:true}),'utf8');
+      }
+    }catch(error){
+      if(win.isDestroyed())return;
+      const known=new Set(['UI_DOCUMENT_MISSING','UI_NOT_VISIBLE','UI_STYLES_MISSING','UI_BLANK_FRAME']);
+      const code=known.has(error?.code)?error.code:'UI_LOAD_FAILED';
+      if(smokeProfile){
+        // Only fixed codes are persisted inside the throwaway smoke profile.
+        // Never record the URL, console, application data or project paths.
+        await writeFile(join(app.getPath('userData'),'ui-smoke-ready.json'),
+          JSON.stringify({status:'UI_FAIL',code}),'utf8').catch(()=>{});
+        return;
+      }
+      const answer=await dialog.showMessageBox({
+        type:'error',
+        title:desktopText('表示エラー','Display error'),
+        message:desktopText('画面の読み込みに失敗しました','Could not render Codex Inventory'),
+        detail:desktopText('診断コード: ','Diagnostic code: ')+code+
+          desktopText('\n再読込しても直らない場合は、このコードのみ共有してください。',
+            '\nIf reloading does not help, share only this diagnostic code.'),
+        buttons:nativeLocale==='en'?['Retry','Close']:['再読込','終了'],
+        defaultId:0,cancelId:1,noLink:true
+      });
+      if(answer.response===0&&!closing&&!win.isDestroyed())void renderAndCheck();
+      else app.quit();
+    }
+  }
+  void renderAndCheck();
 }
 
 // Locale IPC accepts a fixed enum and only the application's own main frame.
