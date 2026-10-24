@@ -127,3 +127,15 @@ test('host read-only App Server child gets only synthetic profile directories',(
     assert.notEqual(env.Path,process.env.Path);
   }
 });
+
+test('delayed startup warning is classified before any thread/list request',async()=>{
+  const fake=new EventEmitter();
+  let requested=false;
+  fake.start=async()=>{setTimeout(()=>fake.emit('notification',{
+    method:'configWarning',
+    params:{summary:'Error parsing rules; custom rules not applied.'}
+  }),5);};
+  fake.request=async()=>{requested=true;return {data:[]};};
+  await assert.rejects(()=>readOnlyHandshake(fake),{code:'CONFIG_EXEC_POLICY'});
+  assert.equal(requested,false);
+});
