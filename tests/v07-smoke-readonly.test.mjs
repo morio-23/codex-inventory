@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import {fileURLToPath} from 'node:url';
 import {AppServerClient} from '../app-server-client.mjs';
-import {readOnlyHandshake} from '../scripts/v07-smoke-readonly.mjs';
+import {readOnlyHandshake,classifyStartupConfigWarning} from '../scripts/v07-smoke-readonly.mjs';
 
 const fixture=fileURLToPath(new URL('./fixtures/mock-app-server.mjs',import.meta.url));
 const script=fileURLToPath(new URL('../scripts/v07-smoke-readonly.mjs',import.meta.url));
@@ -71,4 +71,37 @@ test('read-only smoke handshake classifies client warnings without their content
   fake.request=async()=>({data:[]});
   await assert.rejects(()=>readOnlyHandshake(fake),error=>
     error.code==='CLIENT_WARNING'&&!error.message.includes('synthetic-secret-path'));
+});
+
+test('public v0.144.6 config warning categories use exact known summaries only',()=>{
+  const samples=[
+    ['Invalid configuration; using defaults.','CONFIG_INVALID_DEFAULTS'],
+    ['Codex rebuilt its local database.','CONFIG_SQLITE_RECOVERY'],
+    ['Error parsing rules; custom rules not applied.','CONFIG_EXEC_POLICY'],
+    ['Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\\n    1. SYNTHETIC_TEST_FOLDER','CONFIG_UNTRUSTED_PROJECT'],
+    ['Unrecognized warning for SYNTHETIC_TEST_FOLDER','CONFIG_WARNING'],
+    ['Invalid configuration; using defaults. additional text','CONFIG_WARNING'],
+  ];
+  for(const [summary,expected] of samples){
+    assert.equal(classifyStartupConfigWarning({
+      summary,details:'SYNTHETIC_PRIVATE_DETAILS',path:'SYNTHETIC_PRIVATE_PATH',
+      range:{start:{line:1,column:1},end:{line:1,column:2}}
+    }),expected);
+  }
+  assert.equal(classifyStartupConfigWarning(null),'CONFIG_WARNING');
+  assert.equal(classifyStartupConfigWarning({details:'SYNTHETIC_PRIVATE_DETAILS'}),'CONFIG_WARNING');
+});
+
+test('classified warnings stop before listing threads and never echo private warning fields',async()=>{
+  const fake=new EventEmitter();
+  fake.start=async()=>fake.emit('notification',{
+    method:'configWarning',
+    params:{summary:'Invalid configuration; using defaults.',
+      details:'SYNTHETIC_PRIVATE_DETAILS',path:'SYNTHETIC_PRIVATE_PATH'}
+  });
+  fake.request=async()=>{throw new Error('UNSAFE_THREAD_LIST_ATTEMPT');};
+  await assert.rejects(()=>readOnlyHandshake(fake),error=>
+    error.code==='CONFIG_INVALID_DEFAULTS'&&
+    !error.message.includes('SYNTHETIC_PRIVATE_DETAILS')&&
+    !error.message.includes('SYNTHETIC_PRIVATE_PATH'));
 });
