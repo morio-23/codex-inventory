@@ -1900,6 +1900,8 @@ test('official Codex conversation title outranks preview in primary and split hi
   await page.locator('#ui-language').selectOption('en');
   await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
   await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
+  expect(await page.evaluate(()=>Object.keys(localStorage).some(key=>
+    (localStorage.getItem(key)||'').includes('正式なチャット名')))).toBe(false);
   await page.reload();
   await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
 });
