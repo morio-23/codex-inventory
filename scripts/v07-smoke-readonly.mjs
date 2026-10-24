@@ -4,9 +4,11 @@ import {join,resolve,basename,win32} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {AppServerClient} from '../app-server-client.mjs';
 
-// Both tags have identical initialize, config-warning schema and startup
-// warning sources; permit only these versions for stage-one read-only smoke.
-export const supportedReadOnlyVersions=Object.freeze(['0.144.5','0.144.6']);
+// The two v0.144 tags share initialization and startup warning handling.
+// The v0.164 tag retains initialize/configWarning and the empty thread/list
+// contract but has broader internal changes. This allowlist is STAGE-ONE ONLY:
+// it is not proof of full Inventory protocol compatibility.
+export const supportedReadOnlyVersions=Object.freeze(['0.144.5','0.144.6','0.164.0']);
 const self=fileURLToPath(import.meta.url);
 const environmentScript=fileURLToPath(new URL('./v07-smoke-environment.ps1',import.meta.url));
 
