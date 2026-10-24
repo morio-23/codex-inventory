@@ -10,13 +10,31 @@ const environmentScript=fileURLToPath(new URL('./v07-smoke-environment.ps1',impo
 
 function stop(code){throw Object.assign(new Error(code),{code});}
 
+// These exact public strings come from openai/codex rust-v0.144.6 app-server
+// startup warnings. Do not inspect, print, hash, or persist the actual detail,
+// path, range, or unknown summary: they may include local/private information.
+// Classification is *not* permission to bypass a warning or continue the test.
+const untrustedProjectPrefix='Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\\n';
+export function classifyStartupConfigWarning(params){
+  const summary=params?.summary;
+  if(typeof summary!=='string')return 'CONFIG_WARNING';
+  switch(summary){
+    case 'Invalid configuration; using defaults.':return 'CONFIG_INVALID_DEFAULTS';
+    case 'Codex rebuilt its local database.':return 'CONFIG_SQLITE_RECOVERY';
+    case 'Error parsing rules; custom rules not applied.':return 'CONFIG_EXEC_POLICY';
+    default:
+      return summary.startsWith(untrustedProjectPrefix)
+        ? 'CONFIG_UNTRUSTED_PROJECT' : 'CONFIG_WARNING';
+  }
+}
+
 /** Only request metadata from a newly empty synthetic Codex home. */
 export async function readOnlyHandshake(client){
   let unexpectedCode;
   const flagNotification=notification=>{
     // Record only a fixed category; params may contain paths or account details.
     switch(notification?.method){
-      case 'configWarning': unexpectedCode ??= 'CONFIG_WARNING';break;
+      case 'configWarning': unexpectedCode ??= classifyStartupConfigWarning(notification?.params);break;
       case 'warning': unexpectedCode ??= 'SERVER_WARNING';break;
       case 'account/updated': unexpectedCode ??= 'ACCOUNT_EVENT';break;
       case 'remoteControl/status/changed': unexpectedCode ??= 'REMOTE_CONTROL_STATUS';break;
@@ -100,8 +118,9 @@ async function main(){
     const known=new Set(['WINDOWS_REQUIRED','APPROVAL_REQUIRED','MISSING_ARGUMENT',
       'CLI_PATH_REJECTED','PREPARATION_NOT_READY','VERSION_UNAVAILABLE',
       'VERSION_CHANGED','MALFORMED_RESPONSE','NONEMPTY_STATE','UNEXPECTED_EVENT',
-      'CONFIG_WARNING','SERVER_WARNING','ACCOUNT_EVENT','REMOTE_CONTROL_STATUS',
-      'CLIENT_WARNING']);
+      'CONFIG_WARNING','CONFIG_INVALID_DEFAULTS','CONFIG_SQLITE_RECOVERY',
+      'CONFIG_EXEC_POLICY','CONFIG_UNTRUSTED_PROJECT','SERVER_WARNING',
+      'ACCOUNT_EVENT','REMOTE_CONTROL_STATUS','CLIENT_WARNING']);
     const category=known.has(error.code)?error.code:
       /timeout|タイムアウト/i.test(error.message||'')?'TIMEOUT':'RPC_OR_LAUNCH_ERROR';
     console.error(`READONLY_STOP: ${category}. No raw response was recorded.`);
