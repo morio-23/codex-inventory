@@ -21,6 +21,7 @@
     "files": [
       "main.cjs",
       "smoke-profile.cjs",
+      "window-health.cjs",
       "codex-detect.mjs",
       "package.json",
       "preload.cjs"

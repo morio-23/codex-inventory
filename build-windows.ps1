@@ -39,6 +39,9 @@ if ($PortableOnly) {
   npm run dist:win
 }
 if ($LASTEXITCODE -ne 0) { throw 'electron-builder failed' }
+Set-Location $repo
+node (Join-Path $repo 'scripts/check-packaged-ui.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Packaged UI assets are missing or invalid; no release acceptance' }
 Write-Host '[4/4] Dependency license inventory and SHA-256 manifest'
 Set-Location $repo
 node (Join-Path $repo 'third-party-inventory.mjs') (Join-Path $repo 'dist/THIRD_PARTY_REVIEW.json')
