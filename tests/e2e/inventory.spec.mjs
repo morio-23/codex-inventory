@@ -834,13 +834,12 @@ test('project hotbars are restored independently and old threads are never sent 
   await expect(page.locator('#hotbar button').first()).not.toHaveAttribute('data-item','review');
   await page.locator('#project-select').selectOption(box.beta);
   await expect(page.locator('#hotbar button').first()).toHaveAttribute('data-item','review');
-  // The beta project must restore its own chat, not the foreign alpha chat
-  // that was inspected in global history mode before switching away.
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  // The beta project must restore its own titled chat, never a foreign one.
+  await expect(page.locator('#active-thread')).toHaveText('Beta project');
   await expect(page.locator('#run')).toBeEnabled();
   await page.reload();
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  await expect(page.locator('#active-thread')).toHaveText('Beta project');
   await expect(page.locator('#run')).toBeEnabled();
 });
 
@@ -1694,7 +1693,7 @@ test('approval activity is deduplicated and clears when the request resolves (@m
   await expect(activity).toHaveCount(0);
 });
 
-test('workspace conflict warning uses anonymous chat names and clears automatically (@mock)',async({page})=>{
+test('workspace conflict warning uses safe thread titles and clears automatically (@mock)',async({page})=>{
   box=await sandbox();const {url}=await box.start({MOCK_TURN_DELAY_MS:'3500'});
   await page.goto(url);
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
@@ -1710,8 +1709,8 @@ test('workspace conflict warning uses anonymous chat names and clears automatica
   await page.locator('#run').click();
   const warning=page.locator('#workspace-conflicts');
   await expect(warning).toBeVisible();
-  await expect(warning).toContainText('チャット1');
-  await expect(warning).toContainText('チャット2');
+  await expect(warning).toContainText(/チャット1|synthetic edit one/);
+  await expect(warning).toContainText(/チャット2|synthetic edit two/);
   await expect(warning).toContainText('未確定');
   await expect(warning).not.toContainText(first);
   await expect(warning).not.toContainText(second);
@@ -1719,12 +1718,12 @@ test('workspace conflict warning uses anonymous chat names and clears automatica
   await expect(warning).toBeHidden({timeout:15000});
 });
 
-test('project and chat chrome hides workspace names and prompt previews (@mock)',async({page})=>{
+test('project paths stay anonymous while chat previews are visible (@mock)',async({page})=>{
   box=await seededProjects();const {url}=await box.start({CODEX_WORKSPACE:''});
   await page.goto(url);
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
   await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  await expect(page.locator('#active-thread')).toHaveText('Beta project');
   for(const selector of ['#workspace','#project-select','#project-hint','#thread-list','#active-thread']){
     const text=await page.locator(selector).textContent();
     expect(text).not.toContain('alpha');
@@ -1736,7 +1735,8 @@ test('project and chat chrome hides workspace names and prompt previews (@mock)'
   const options=await page.locator('#project-select option').evaluateAll(nodes=>nodes.map(node=>node.title));
   expect(options.every(title=>/^プロジェクト\d+$/.test(title))).toBe(true);
   const chatTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
-  expect(chatTitles.every(title=>/^チャット\d+$/.test(title))).toBe(true);
+  expect(chatTitles).toContain('Beta project');
+  expect(chatTitles.every(title=>title==='Alpha project'||title==='Beta project')).toBe(true);
 });
 
 test('three chats across two workspaces keep activity, approvals and stops correctly scoped (@mock)',async({page})=>{
@@ -1882,3 +1882,25 @@ test('three chats across two workspaces keep activity, approvals and stops corre
   await expect(conflict).not.toContainText(box.alpha);
   await expect(conflict).toBeHidden({timeout:15000});
 });
+
+test('official Codex conversation title outranks preview in primary and split history (@mock)',async({page})=>{
+  box=await seededProjects();
+  const snapshot=JSON.parse(await readFile(box.store,'utf8'));
+  const beta=snapshot.threads.find(t=>t.id==='mock-beta-auto');
+  beta.name='正式なチャット名';
+  await writeFile(box.store,JSON.stringify(snapshot));
+  const {url}=await box.start({CODEX_WORKSPACE:''});
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
+  await expect(page.locator('.thread-item[data-thread-id="mock-beta-auto"] .thread-name')).toHaveText('正式なチャット名');
+  await page.locator('#split-toggle').click();
+  await expect(page.locator('#secondary-thread option[value="mock-beta-auto"]')).toHaveText('正式なチャット名');
+  await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
+  await page.locator('#ui-language').selectOption('en');
+  await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
+  await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
+  await page.reload();
+  await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
+});
+
