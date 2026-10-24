@@ -995,7 +995,7 @@ function paintProjectPicker(){
     select.append(option);select.disabled=true;
   }else{
     for(const project of detectedProjects){
-      const option=document.createElement('option');option.value=project.cwd;
+      const option=document.createElement('option');option.value=project.cwd;option.dataset.i18nIgnore='';
       option.textContent=displayLabels.projectLabel(project.cwd,getLanguage())+' · '+project.threadCount+(getLanguage()==='en'?' chats':'件')+(project.exists?'':getLanguage()==='en'?' (folder missing)':'（フォルダーなし）');
       option.title=displayLabels.projectLabel(project.cwd,getLanguage());option.disabled=!project.exists;
       select.append(option);
