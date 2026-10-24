@@ -148,7 +148,17 @@ function openWindow(url){
   // captured framebuffer before accepting the packaged GUI as working.
   async function renderAndCheck(){
     try{
-      await win.loadURL(url);
+      // Never leave a stalled navigation showing the BrowserWindow background.
+      let loadTimer;
+      try {
+        await Promise.race([
+          win.loadURL(url),
+          new Promise((_resolve,reject)=>{
+            loadTimer=setTimeout(()=>reject(Object.assign(
+              new Error('UI_LOAD_TIMEOUT'),{code:'UI_LOAD_TIMEOUT'})),15000);
+          })
+        ]);
+      } finally { clearTimeout(loadTimer); }
       if(win.isDestroyed())return;
       const health=await win.webContents.executeJavaScript(RENDER_PROBE,true);
       const code=classifyDocumentHealth(health);
@@ -166,7 +176,7 @@ function openWindow(url){
       }
     }catch(error){
       if(win.isDestroyed())return;
-      const known=new Set(['UI_DOCUMENT_MISSING','UI_NOT_VISIBLE','UI_STYLES_MISSING','UI_BLANK_FRAME']);
+      const known=new Set(['UI_DOCUMENT_MISSING','UI_NOT_VISIBLE','UI_STYLES_MISSING','UI_BLANK_FRAME','UI_LOAD_TIMEOUT']);
       const code=known.has(error?.code)?error.code:'UI_LOAD_FAILED';
       if(smokeProfile){
         // Only fixed codes are persisted inside the throwaway smoke profile.
