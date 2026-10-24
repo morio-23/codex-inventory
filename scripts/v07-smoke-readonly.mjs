@@ -4,7 +4,9 @@ import {join,resolve,basename,win32} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {AppServerClient} from '../app-server-client.mjs';
 
-const expectedVersion='0.144.6';
+// Both tags have identical initialize, config-warning schema and startup
+// warning sources; permit only these versions for stage-one read-only smoke.
+export const supportedReadOnlyVersions=Object.freeze(['0.144.5','0.144.6']);
 const self=fileURLToPath(import.meta.url);
 const environmentScript=fileURLToPath(new URL('./v07-smoke-environment.ps1',import.meta.url));
 
@@ -113,7 +115,7 @@ function numericVersion(cli,env,cwd){
   });
   const match=/^codex-cli\s+(\d+\.\d+\.\d+)\s*$/m.exec(checked.stdout||'');
   if(checked.status!==0||!match)stop('VERSION_UNAVAILABLE');
-  if(match[1]!==expectedVersion)stop('VERSION_CHANGED');
+  if(!supportedReadOnlyVersions.includes(match[1]))stop('VERSION_CHANGED');
   return match[1];
 }
 
