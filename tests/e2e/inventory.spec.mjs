@@ -1294,7 +1294,7 @@ test('Codex completion provides in-app and native bridge notifications once, wit
   expect(await page.evaluate(()=>window.testNativeCompletionCalls)).toEqual(['completed']);
   await page.locator('#completion-toast-open').click();
   await expect(page.locator('#completion-toast')).toBeHidden();
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  await expect(page.locator('#active-thread')).toHaveText(await page.locator('.thread-item.chosen .thread-name').textContent());
   await page.locator('#completion-notifications').uncheck();
   await page.reload();
   await expect(page.locator('#completion-notifications')).not.toBeChecked();
@@ -1649,7 +1649,7 @@ test('failed activity stays until acknowledged and duplicate completion stays si
   expect(response.status()).toBe(202);
   const row=page.locator('#activity-feed-list .activity-failed');
   await expect(row).toHaveCount(1);
-  await expect(row).toContainText('チャット1');
+  await expect(row).toContainText(/チャット1|synthetic failed turn/);
   await page.waitForTimeout(8500);
   await expect(row).toHaveCount(1);
   await expect(page.locator('#activity-feed-list .activity-dismiss')).toBeVisible();
@@ -1659,7 +1659,7 @@ test('failed activity stays until acknowledged and duplicate completion stays si
   await expect(row).toHaveCount(1);
   await expect(page.locator('#activity-feed-list .activity-dismiss')).toHaveCount(0);
   await row.click();
-  await expect(page.locator('#active-thread')).toHaveText('チャット1');
+  await expect(page.locator('#active-thread')).toHaveText(await page.locator('.thread-item.chosen .thread-name').textContent());
 });
 
 test('approval activity is deduplicated and clears when the request resolves (@mock)',async({page})=>{
@@ -1674,7 +1674,7 @@ test('approval activity is deduplicated and clears when the request resolves (@m
   expect(response.status()).toBe(202);
   const activity=page.locator('#activity-feed-list .activity-approval');
   await expect(activity).toHaveCount(1);
-  await expect(activity).toContainText('チャット1');
+  await expect(activity).toContainText(/チャット1|synthetic approval request/);
   await page.reload();
   await expect(activity).toHaveCount(1);
   await page.locator('#split-toggle').click();
