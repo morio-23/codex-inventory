@@ -140,10 +140,12 @@ test('delayed startup warning is classified before any thread/list request',asyn
   assert.equal(requested,false);
 });
 
-test('only audited 0.144.5 and 0.144.6 are allowed for stage-one read-only diagnostics',()=>{
-  assert.deepEqual([...supportedReadOnlyVersions],['0.144.5','0.144.6']);
+test('only reviewed 0.144.5, 0.144.6 and 0.164.0 are allowed for stage-one read-only diagnostics',()=>{
+  assert.deepEqual([...supportedReadOnlyVersions],['0.144.5','0.144.6','0.164.0']);
   assert.equal(supportedReadOnlyVersions.includes('0.144.4'),false);
   assert.equal(supportedReadOnlyVersions.includes('0.144.7'),false);
+  assert.equal(supportedReadOnlyVersions.includes('0.163.0'),false);
+  assert.equal(supportedReadOnlyVersions.includes('0.165.0'),false);
   assert.equal(supportedReadOnlyVersions.includes('1.0.0'),false);
   assert.ok(Object.isFrozen(supportedReadOnlyVersions));
 });
