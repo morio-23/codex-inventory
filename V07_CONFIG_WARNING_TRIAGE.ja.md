@@ -18,6 +18,59 @@
 
 `summary` の全文、`details`、`path`、`range`、stderr、生JSON-RPC、実アカウント・スレッドIDは表示・記録・GitHubへ転記しない。分類は許可リストの固定テキストとの照合のみであり、パスや詳細を抽出・ハッシュ化もしない。
 
+## 2026-10-24追記：同一Windowsホストでの限定実行（ユーザー指定）
+
+VMを用意できないため、今回は既存のWindows端末上で**段階1：読取専用RPC**までの診断を認める。これは同一OSユーザーの実行であり**セキュリティ境界ではない**。環境変数からの既存プロファイル・認証・代理サーバー等の継承を減らす変更をしたが、OS API、同じユーザー権限、システム全体の設定、ネットワークへのアクセスまで防ぐものではない。Codex自身が一時DBや設定ファイルを生成することはあり得る。
+
+今回禁止：`run.ps1`、`npm start`、通常のInventory/デスクトップ起動、既存セッション読込、ログイン、実ターン、チケット消費、承認許可、ファイル編集、外部公開。実推論/承認の追加検証は**本手順に含めない**。
+
+### まず合成テスト（実Codexを起動しない）
+
+```powershell
+# F:\CodexWorkSpace\codex-inventory-v07-verify で実行
+git fetch origin
+git switch codex/v07-config-warning-triage-20261024
+git pull --ff-only origin codex/v07-config-warning-triage-20261024
+git rev-parse --short HEAD
+git status --short
+npm run check
+node --test tests/v07-smoke-readonly.test.mjs tests/v07-smoke-environment.test.mjs
+npm test
+git diff --check origin/main...HEAD
+node scripts/audit-v07-diff.mjs main
+```
+
+合成テストが0 FAILで作業ツリーがクリーンであること。出力だけを共有してよい。実機接続結果として数えない。
+
+### ホスト上の読取専用App Server段階1（合成テスト合格後のみ）
+
+現在のPowerShellウィンドウを使用し、OSや既存Codexユーザープロファイルを変更しない。CLIを自動更新・ダウングレードしない。スクリプトはCLI版`0.144.6`以外を拒否する。
+
+```powershell
+$globalRoot = npm root --global
+$cliCandidates = @(Get-ChildItem -LiteralPath $globalRoot -Filter codex.exe -File -Recurse -ErrorAction SilentlyContinue)
+if ($cliCandidates.Count -ne 1) { throw 'Standalone codex.exe must be uniquely identified; stop here.' }
+$smokeCli = $cliCandidates[0].FullName
+if ((& $smokeCli --version) -ne 'codex-cli 0.144.6') { throw 'CLI version mismatch; stop here.' }
+
+$smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ('codex-inventory-v07-smoke-' + [Guid]::NewGuid().ToString('N'))
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Prepare -Root $smokeRoot
+if ($LASTEXITCODE -ne 0) { throw 'Prepare failed.' }
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Verify -Root $smokeRoot
+if ($LASTEXITCODE -ne 0) { throw 'Verify failed.' }
+
+# 段階1だけ。ホストがオンラインの場合、同じユーザーの権限で
+# ネットワークを利用する可能性がある。可能なら手動で一時的にオフラインにする。
+node .\scripts\v07-smoke-readonly.mjs --root $smokeRoot --cli $smokeCli --approved-readonly-app-server
+
+# 結果を記録し終えてから合成一時ルートだけ削除
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Cleanup -Root $smokeRoot -ConfirmCleanup
+```
+
+スクリプトの`READONLY_OK`または`READONLY_STOP: 固定分類`のみ共有。内部パス、生ログ、stderrや警告本文を共有しない。上記以外のコマンドを手探りで追加実行せず、一度停止して原因を整理する。
+
+**公開ゲート上の扱い：** 同一ホストの段階1が成功しても、OSレベルの隔離確認、実ターン・承認・復帰、Setup/Portableの別環境動作検証が未完了ならv0.7の配布可否はなお未決定。「VM検証済み」とは記載しない。
+
 ## Windows端末だけで先に実施できる確認（**実Codexを起動しない**）
 
 ```powershell
