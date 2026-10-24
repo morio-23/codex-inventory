@@ -163,14 +163,16 @@ function openWindow(url){
       const health=await win.webContents.executeJavaScript(RENDER_PROBE,true);
       const code=classifyDocumentHealth(health);
       if(code!=='UI_READY')throw Object.assign(new Error(code),{code});
+      // A valid DOM is insufficient if Chromium renders a blank window.
+      // Inspect colors entirely in memory; never save screenshots or UI text.
+      if(!win.isVisible())win.show();
+      await new Promise(resolve=>setTimeout(resolve,350));
+      if(win.isDestroyed())return;
+      const capture=await win.capturePage();
+      const size=capture.getSize();
+      const colors=countVisualColorBuckets(capture.toBitmap(),size.width,size.height);
+      if(colors<5)throw Object.assign(new Error('UI_BLANK_FRAME'),{code:'UI_BLANK_FRAME'});
       if(smokeProfile){
-        if(!win.isVisible())win.show();
-        await new Promise(resolve=>setTimeout(resolve,350));
-        if(win.isDestroyed())return;
-        const capture=await win.capturePage();
-        const size=capture.getSize();
-        const colors=countVisualColorBuckets(capture.toBitmap(),size.width,size.height);
-        if(colors<5)throw Object.assign(new Error('UI_BLANK_FRAME'),{code:'UI_BLANK_FRAME'});
         await writeFile(join(app.getPath('userData'),'ui-smoke-ready.json'),
           JSON.stringify({status:'UI_READY',painted:true}),'utf8');
       }
