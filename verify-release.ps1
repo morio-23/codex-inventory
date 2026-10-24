@@ -12,6 +12,8 @@ Set-Location -LiteralPath $repo
 if ($env:OS -ne 'Windows_NT') {
   throw 'This release verification script requires Windows.'
 }
+node (Join-Path $repo 'scripts/check-build-version.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Release version preflight failed.' }
 
 $results = [System.Collections.Generic.List[object]]::new()
 $start = Get-Date
