@@ -100,6 +100,10 @@ async function untranslatedChrome(page){
 }
 
 test('English auto-detection, reversible language switch, saved preference, ticket safety and templates',async({browser})=>{
+  // This test deliberately visits every inventory card and tooltip, exercises
+  // four viewport widths and verifies mock ticket/locale/template flows.
+  // Give only this comprehensive test a longer budget, not the whole suite.
+  test.setTimeout(120_000);
   box=await sandbox();
   const {url}=await box.start({MOCK_RESET_CREDITS:'1'});
   const context=await browser.newContext({locale:'en-US'});
@@ -116,22 +120,32 @@ test('English auto-detection, reversible language switch, saved preference, tick
     expect(await untranslatedChrome(english)).toContain('@placeholder: 未翻訳プレースホルダー');
     await english.locator('#prompt').evaluate(element=>element.setAttribute('placeholder','Example: Review this app and suggest improvements'));
     const residuals={initial:await untranslatedChrome(english)};
-    for(const category of await english.locator('#catalog-categories button').evaluateAll(nodes=>nodes.map(node=>node.dataset.category))){
-      await english.locator(`#catalog-categories [data-category="${category}"]`).click();
-      for(;;){
-        const ids=await english.locator('#slots [data-item]').evaluateAll(nodes=>nodes.map(node=>node.dataset.item));
-        for(const id of ids){
-          const slot=english.locator(`#slots [data-item="${id}"]`);
-          await slot.click();
-          residuals['item-'+id]=await untranslatedChrome(english);
-          await slot.hover();
-          residuals['tooltip-'+id]=await untranslatedChrome(english);
-          await english.mouse.move(0,0);
-        }
-        if(await english.locator('#catalog-next').isDisabled())break;
-        await english.locator('#catalog-next').click();
+    await test.step('English inventory and tooltip localization sweep',async()=>{
+      const categories=await english.locator('#catalog-categories button')
+        .evaluateAll(nodes=>nodes.map(node=>node.dataset.category));
+      for(const category of categories){
+        await test.step('Audit catalog '+category,async()=>{
+          await english.locator(`#catalog-categories [data-category="${category}"]`).click();
+          // Bound pagination to report a precise failure if the last page
+          // cannot be reached; do not hide loops behind a bigger timeout.
+          for(let pageIndex=0;pageIndex<20;pageIndex++){
+            const ids=await english.locator('#slots [data-item]')
+              .evaluateAll(nodes=>nodes.map(node=>node.dataset.item));
+            for(const id of ids){
+              const slot=english.locator(`#slots [data-item="${id}"]`);
+              await slot.click();
+              residuals['item-'+id]=await untranslatedChrome(english);
+              await slot.hover();
+              residuals['tooltip-'+id]=await untranslatedChrome(english);
+              await english.mouse.move(0,0);
+            }
+            if(await english.locator('#catalog-next').isDisabled())return;
+            await english.locator('#catalog-next').click();
+          }
+          throw new Error('E2E_CATALOG_PAGINATION_DID_NOT_TERMINATE');
+        });
       }
-    }
+    });
     const ticket=english.locator('#featured-item [data-item="reset-credit"]');
     await expect(ticket.locator('.slot-label')).toHaveText('Codex reset ticket');
     await expect(ticket.locator('.reset-ticket-count')).toHaveText('2 tickets');
