@@ -18,6 +18,28 @@
 
 `summary` の全文、`details`、`path`、`range`、stderr、生JSON-RPC、実アカウント・スレッドIDは表示・記録・GitHubへ転記しない。分類は許可リストの固定テキストとの照合のみであり、パスや詳細を抽出・ハッシュ化もしない。
 
+## 2026-10-24追記：0.164.0のREMOTE_CONTROL_STATUS分類
+
+> 過去のリードオンリー試験結果：別端末、CLI 0.164.0、`PREPARED` / `READY` / `CLEANED` は成功。`READONLY_STOP: REMOTE_CONTROL_STATUS`（終了コード2）。既存スレッドや実推論に進まず停止。**通知の実際の状態は記録していないため、接続中だったとは断定しない。**
+
+公式 [0.164.0 app-serverの初期化送信処理](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/lib.rs) は、初期化済み接続ごとに `RemoteControlStatusChanged` を送信する。型は [RemoteControlStatusChangedNotification](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/schema/typescript/v2/RemoteControlStatusChangedNotification.ts) に定義され、`status` に `disabled` / `connecting` / `connected` / `errored` を持つ。**初期化通知の受信だけでは、リモート操作が有効だった証拠にはならない。**
+
+0.164.0向けの合成環境変数に、公式起動時の [remote control無効化マーカー](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-transport/src/transport/remote_control/mod.rs) を**この子プロセスにのみ**設定する（他のCodex・OS設定・ユーザーの永続設定は触らない）。診断は `status==='disabled'`、`environmentId===null` かつ識別子フィールドの型が正しい通知だけを許容し、識別子やサーバー名は出力しない。それ以外の状態、形式不正、別の警告は固定の `READONLY_STOP` コードで停止する。**「通知を全面無視」はしない。**
+
+これは実Codexのリモート制御の状態を全般的に保証するものではない。ホスト権限・ネットワークアクセスはOSレベルで分離されておらず、v0.7の実ターン・承認・再接続は引き続き未検証。
+
+合成試験（実Codexを起動しない）：
+```powershell
+git pull --ff-only origin codex/v07-config-warning-triage-20261024
+git rev-parse --short HEAD
+npm run check
+node --test tests/v07-smoke-readonly.test.mjs tests/v07-smoke-environment.test.mjs
+git diff --check origin/main...HEAD
+node scripts/audit-v07-diff.mjs main
+```
+
+**0 FAILを確認してから**同一の `Prepare → Verify → 読取専用 → Cleanup` を一回だけ再実行する。結果は固定コード、`SMOKE_EXIT`、`CLEANED` のみ記録する。終了コード0以外は失敗であり、リリース受け入れゲートは通過しない。
+
 ## 2026-10-24追記：同一Windowsホストでの限定実行（ユーザー指定）
 
 VMを用意できないため、今回は別端末のWindows上で**段階1：読取専用RPC**までの診断を認める。これは同一OSユーザーの実行であり**セキュリティ境界ではない**。環境変数からの既存プロファイル・認証・代理サーバー等の継承を減らす変更をしたが、OS API、同じユーザー権限、システム全体の設定、ネットワークへのアクセスまで防ぐものではない。Codex自身が一時DBや設定ファイルを生成することはあり得る。
