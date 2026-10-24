@@ -14,7 +14,7 @@ function stop(code){throw Object.assign(new Error(code),{code});}
 // startup warnings. Do not inspect, print, hash, or persist the actual detail,
 // path, range, or unknown summary: they may include local/private information.
 // Classification is *not* permission to bypass a warning or continue the test.
-const untrustedProjectPrefix='Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\\n';
+const untrustedProjectPrefix='Project-local config, hooks, and exec policies are disabled in the following folders until the project is trusted, but skills still load.\n';
 export function classifyStartupConfigWarning(params){
   const summary=params?.summary;
   if(typeof summary!=='string')return 'CONFIG_WARNING';
