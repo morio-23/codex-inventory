@@ -94,7 +94,30 @@ try {
     }
   }
   if (!$ready) { throw 'Mock App Server did not report ready within the timeout.' }
-  $result = 'PASS: Portable EXE used an isolated profile and mock App Server.'
+  # API readiness alone did not catch the real-world empty Electron window.
+  # The packaged main process now validates DOM, CSS and the framebuffer.
+  $uiMarker=Join-Path $profile 'ui-smoke-ready.json'
+  $uiReady=$false
+  $uiDeadline=(Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $uiDeadline) {
+    if (Test-Path -LiteralPath $uiMarker -PathType Leaf) {
+      try {
+        $uiCheck=Get-Content -LiteralPath $uiMarker -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($uiCheck.status -eq 'UI_FAIL') {
+          throw ('Packaged renderer failed: ' + [string]$uiCheck.code)
+        }
+        if ($uiCheck.status -eq 'UI_READY' -and $uiCheck.painted -eq $true) {
+          $uiReady=$true
+          break
+        }
+      } catch {
+        if ($_.Exception.Message -like 'Packaged renderer failed*') { throw }
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  if (!$uiReady) { throw 'Packaged GUI did not render a nonblank document.' }
+  $result = 'PASS: Portable EXE used an isolated profile, mock App Server and rendered GUI.'
 } finally {
   # The portable launcher can detach its Electron child. Only target
   # processes carrying the unique, randomized smoke profile in their command
