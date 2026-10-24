@@ -49,9 +49,18 @@ node scripts/audit-v07-diff.mjs main
 ```powershell
 $globalRoot = npm root --global
 $cliCandidates = @(Get-ChildItem -LiteralPath $globalRoot -Filter codex.exe -File -Recurse -ErrorAction SilentlyContinue)
-# Codex v0.144.5の公式npm起動ラッパーで採用されるWindows x64配置のみを選ぶ
+# Windows x64版のネイティブ配置のみを対象にする（他のexeは実行しない）
 $nativeCandidates = @($cliCandidates | Where-Object {
-  $_.FullName -match '\\vendor\\x86_64-pc-windows-msvc\\bin\\codex\\.exe
+  $_.FullName -match '\\vendor\\x86_64-pc-windows-msvc\\bin\\codex\.exe$'
+})
+if ($nativeCandidates.Count -ne 1) {
+  throw 'Windows x64 native Codex candidate is not unique; stop here.'
+}
+$smokeCli = $nativeCandidates[0].FullName
+$smokeVersion = & $smokeCli --version
+if ($smokeVersion -notin @('codex-cli 0.144.5','codex-cli 0.144.6')) {
+  throw 'CLI version not audited for this read-only smoke; stop here.'
+}
 
 $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ('codex-inventory-v07-smoke-' + [Guid]::NewGuid().ToString('N'))
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\v07-smoke-environment.ps1 -Action Prepare -Root $smokeRoot
