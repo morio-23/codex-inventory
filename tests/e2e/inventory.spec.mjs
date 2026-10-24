@@ -73,7 +73,7 @@ async function openTemplates(page){
 }
 async function untranslatedChrome(page){
   return page.evaluate(()=>{
-    const ignored='#ui-language,#reset-credit-choice,#reset-credit-review-details,.thread-name,#log .log-content,#log .command-preview,#log .command-full,#prompt,#template-variables,#local-result-text,[data-i18n-ignore]';
+    const ignored='#ui-language,#reset-credit-choice,#reset-credit-review-details,.thread-item,.thread-name,#log .log-content,#log .command-preview,#log .command-full,#prompt,#template-variables,#local-result-text,[data-i18n-ignore]';
     const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
     const rows=[];
     for(let node=walker.nextNode();node;node=walker.nextNode()){
@@ -1800,7 +1800,10 @@ test('three chats across two workspaces keep activity, approvals and stops corre
   expect(wrong.status()).toBe(409);
   expect((await (await page.request.get(`${url}/api/approvals`,{headers:scope(box.alpha)})).json()).approvals).toHaveLength(1);
   await expect.poll(async()=>!(await state()).runningThreadIds.includes(a2)).toBe(true);
-  await expect(page.locator('#activity-feed-list .activity-completed')).toContainText(a2Label);
+  // The thread preview becomes the user-visible title after its first turn.
+  // Do not compare against the stale anonymous label captured at creation.
+  await expect(page.locator('#activity-feed-list .activity-completed'))
+    .toContainText('A2-progress synthetic work');
   await expect.poll(async()=>[(await state()).runningThreadIds.includes(a1),
     (await state()).runningThreadIds.includes(b1)]).toEqual([true,true]);
   const stopped=await page.request.post(`${url}/api/threads/${b1}/interrupt`,{
@@ -1878,7 +1881,7 @@ test('three chats across two workspaces keep activity, approvals and stops corre
   expect([editOne.status(),editTwo.status()]).toEqual([202,202]);
   const conflict=page.locator('#workspace-conflicts');
   await expect(conflict).toBeVisible();
-  await expect(conflict).toContainText(a2Label);
+  await expect(conflict).toContainText('A2-progress synthetic work');
   await expect(conflict).not.toContainText(box.alpha);
   await expect(conflict).toBeHidden({timeout:15000});
 });
@@ -1899,6 +1902,7 @@ test('official Codex conversation title outranks preview in primary and split hi
   await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
   await page.locator('#ui-language').selectOption('en');
   await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
+  await expect(page.locator('.thread-item[data-thread-id="mock-beta-auto"]')).toHaveAttribute('title','正式なチャット名');
   await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
   expect(await page.evaluate(()=>Object.keys(localStorage).some(key=>
     (localStorage.getItem(key)||'').includes('正式なチャット名')))).toBe(false);
