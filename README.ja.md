@@ -16,9 +16,9 @@
 
 Source code: **[MIT License](LICENSE)** (copyright © 2026 morio-23). Contributions are welcome; please read [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability privately, see [SECURITY.md](SECURITY.md).
 
-**配布状況:** v0.6 の Windows EXE はリリース前の実機検証中です。GitでEXEを管理せず、公開承認後に[GitHub Releases](https://github.com/morio-23/codex-inventory/releases)へ Setup/Portable版と SHA-256 を登録します。ソースのOSS化とEXE公開は別です。公開前の確認項目は[リリース受け入れ手順（日本語）](RELEASE_ACCEPTANCE.ja.md)を参照してください。
+**配布状況（2026年10月23日確認）：** [v0.6.0-beta.1](https://github.com/morio-23/codex-inventory/releases/tag/v0.6.0-beta.1) はWindows Setup/Portable EXEとSHA-256を公開済みです。一方、v0.7のWindows EXEは未公開で、実CodexとWindowsでの受け入れ確認が残っています。[v0.7公開準備の判定資料](V07_RELEASE_READINESS.ja.md)を参照してください。
 
-**公開ソース：** MITライセンスのOSSとして新しいGit履歴で公開しています。GitHub Actionsは手動実行のみのため、[ローカルテスト手順](PUBLICATION_CHECKLIST.ja.md)を参照してください。**Windows版EXEは検証中で、まだ一般配布していません。**
+**公開ソース：** MITライセンスのOSSとして新しいGit履歴で公開しています。GitHub Actionsは手動実行のみ。過去のβ版EXE公開はv0.7の安全性・動作を保証するものではありません。[ローカルテスト手順](PUBLICATION_CHECKLIST.ja.md)を参照してください。
 
 ## 本体UIの言語切替（日本語・英語）
 

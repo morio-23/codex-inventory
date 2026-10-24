@@ -5,15 +5,20 @@ import {execFileSync} from 'node:child_process';
 const base=process.argv[2]||'main';
 const run=(args)=>execFileSync('git',args,{encoding:'utf8',maxBuffer:20*1024*1024,stdio:['ignore','pipe','pipe']});
 function comparisonBase(){
-  run(['rev-parse','--verify',base]);
-  try{run(['merge-base',base,'HEAD']);return base;}
-  catch(error){
-    if(base!=='main')throw error;
-    run(['rev-parse','--verify','origin/main']);
-    run(['merge-base','origin/main','HEAD']);
-    console.log('Local main has no common ancestor; comparing against origin/main.');
-    return 'origin/main';
+  // A release-checkout may have origin/main without a local main branch.
+  // Prefer the fetched public main ref, then use local main only if needed.
+  const candidates=base==='main'?['origin/main','main']:[base];
+  let lastError;
+  for(const candidate of candidates){
+    try{
+      run(['rev-parse','--verify',candidate+'^{commit}']);
+      run(['merge-base',candidate,'HEAD']);
+      if(candidate!==base)console.log('Comparing against origin/main (fetched public main).');
+      return candidate;
+    }catch(error){lastError=error;}
   }
+  // Never silently scan an empty or unrelated diff.
+  throw lastError||new Error('No verified comparison base');
 }
 const checks=[
   ['API key / secret',/(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{18,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----/],
