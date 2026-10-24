@@ -1750,7 +1750,8 @@ test('project folder names display while parent paths stay private (@mock)',asyn
   await expect(page.locator('#workspace')).toHaveText('alpha');
   await page.locator('#ui-language').selectOption('en');
   await expect(page.locator('#workspace')).toHaveText('alpha');
-  await expect(page.locator('#project-select option')).toContainText(['alpha · 1 chats','beta · 1 chats']);
+  await expect(page.locator('#project-select')).toContainText('alpha · 1 chats');
+  await expect(page.locator('#project-select')).toContainText('beta · 1 chats');
   await page.reload();
   await expect(page.locator('#workspace')).toHaveText('alpha');
   const chatTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
