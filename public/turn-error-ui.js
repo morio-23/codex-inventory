@@ -30,12 +30,17 @@ const CATEGORIES=Object.freeze({
     'Codexからの応答が間に合いませんでした。再送信前に履歴と実行状態を確認してください。',
     'Codex did not respond in time. Check history and running status before resending.'
   ],
+  INVALID_SANDBOX_POLICY:[
+    'Codex CLIと実行時サンドボックス設定に互換性の問題があります。アプリのバージョンを確認してください。',
+    'The Codex CLI rejected the sandbox configuration. Check application compatibility.'
+  ],
   TURN_REJECTED:[
     'Codexが実行要求を拒否しました。送信前の内容と対象チャットを確認してください。',
     'Codex rejected the request. Check the chat and submission settings.'
   ]
 });
 const MATCHES=[
+  ['INVALID_SANDBOX_POLICY',/sandbox.?policy|sandbox configuration|missing field.*(?:networkAccess|excludeTmpdirEnvVar|excludeSlashTmp)/i],
   ['WORKSPACE_MISMATCH',/別プロジェクト|別ワークスペース|プロジェクトが切り替わ|workspace (?:does not match|mismatch)|different workspace|wrong workspace/i],
   ['THREAD_BUSY',/別のクライアントで実行中|このスレッドは実行中|already (?:running|active|in progress)|thread (?:is )?(?:busy|active)|another client/i],
   ['THREAD_RESUME_FAILED',/thread\/resume|failed to (?:read|resume).*thread|could not resume|cannot resume|unknown thread|thread (?:not found|does not exist)|conversation (?:not found|does not exist)|rollout.*(?:missing|empty|not found)/i],
