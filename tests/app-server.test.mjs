@@ -53,7 +53,21 @@ test('v2 requests declare explicit review routing and complete text input shape'
   assert.deepEqual(observed.get('turn/start')?.input,[
     {type:'text',text:'Synthetic contract input',text_elements:[]}
   ]);
+  // Official 0.144.5/0.164.0 v2 SandboxPolicy unions require networkAccess
+  // for readOnly, and both excludeTmpdirEnvVar/excludeSlashTmp for
+  // workspaceWrite. The old incomplete objects passed mocks but fail strict
+  // real app-server deserialization before a Codex turn can begin.
+  assert.deepEqual(observed.get('turn/start')?.sandboxPolicy,{
+    type:'readOnly',networkAccess:false
+  });
   await complete(service,thread.id);
+  const {thread:editable}=await service.createThread({editing:true});
+  await service.startTurn({threadId:editable.id,prompt:'Synthetic edit contract',editing:true});
+  assert.deepEqual(observed.get('turn/start')?.sandboxPolicy,{
+    type:'workspaceWrite',writableRoots:[process.cwd()],networkAccess:false,
+    excludeTmpdirEnvVar:true,excludeSlashTmp:true
+  });
+  await complete(service,editable.id);
 });
 
 test('current command approval mock carries protocol correlation metadata',async t=>{
