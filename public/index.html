@@ -131,12 +131,24 @@
             <label>モデル<select id="secondary-model"><option value="">Codex設定を継承</option></select></label>
             <label>推論<select id="secondary-effort"><option value="">既定</option></select></label>
           </div>
-          <label class="split-field">アクション<select id="secondary-action">
-            <option value="quest">自由依頼</option><option value="inspect">調査</option>
-            <option value="build">実装</option><option value="fix">修正</option>
-            <option value="test">テスト</option><option value="review">レビュー</option>
-            <option value="map">構成把握</option>
-          </select></label>
+          <div class="split-action-picker">
+            <div class="split-action-header"><span id="secondary-action-title">アクション</span><span id="secondary-action-help" class="split-action-help" aria-live="polite"></span></div>
+            <select id="secondary-action" class="split-action-native" aria-hidden="true" tabindex="-1">
+              <option value="quest">自由依頼</option><option value="inspect">調査</option>
+              <option value="build">実装</option><option value="fix">修正</option>
+              <option value="test">テスト</option><option value="review">レビュー</option>
+              <option value="map">構成把握</option>
+            </select>
+            <div id="secondary-action-options" class="split-action-options" role="radiogroup" aria-labelledby="secondary-action-title">
+              <button type="button" role="radio" data-action="quest" aria-checked="true" tabindex="0"><span aria-hidden="true">✦</span><span data-i18n-ignore>自由依頼</span></button>
+              <button type="button" role="radio" data-action="inspect" aria-checked="false" tabindex="-1"><span aria-hidden="true">⌕</span><span data-i18n-ignore>調査</span></button>
+              <button type="button" role="radio" data-action="build" aria-checked="false" tabindex="-1"><span aria-hidden="true">▣</span><span data-i18n-ignore>実装</span></button>
+              <button type="button" role="radio" data-action="fix" aria-checked="false" tabindex="-1"><span aria-hidden="true">⚒</span><span data-i18n-ignore>修正</span></button>
+              <button type="button" role="radio" data-action="test" aria-checked="false" tabindex="-1"><span aria-hidden="true">✓</span><span data-i18n-ignore>テスト</span></button>
+              <button type="button" role="radio" data-action="review" aria-checked="false" tabindex="-1"><span aria-hidden="true">◇</span><span data-i18n-ignore>レビュー</span></button>
+              <button type="button" role="radio" data-action="map" aria-checked="false" tabindex="-1"><span aria-hidden="true">☷</span><span data-i18n-ignore>構成把握</span></button>
+            </div>
+          </div>
           <label class="split-field">任務の内容<textarea id="secondary-prompt" placeholder="別のチャットへの依頼"></textarea></label>
           <label class="split-edit"><input type="checkbox" id="secondary-editing"> ファイル編集を許可</label>
           <div class="run-actions"><button type="button" id="secondary-send" class="primary-btn" disabled>▶ 実行</button>
