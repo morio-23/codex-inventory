@@ -72,10 +72,10 @@ export class CodexService extends EventEmitter {
     this.connectionEpoch=0;this.needsRecovery=true;this.recoveryPromise=null;
     this.knownProjects=new Set(Array.isArray(knownProjects)?knownProjects.filter(x=>typeof x==='string'&&x.length<=4096):[]);
     this.approvals=new Map();this.approvalSequence=0;this.turnWorkspaces=new Map();
-    this.running=new Map();this.editingThreads=new Set();this.finishedTurns=new Set();this.recentCompletions=[];this.earlyCompletions=new Map();this.earlyApprovals=new Map();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();
+    this.running=new Map();this.editingThreads=new Set();this.finishedTurns=new Set();this.recentCompletions=[];this.earlyCompletions=new Map();this.earlyApprovals=new Map();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();this.freshEmptyThreads=new Set();
     client.on('notification',e=>this.#notification(e));
     client.on('server-request',e=>this.#onApproval(e));
-    client.on('disconnect',error=>{this.connectionEpoch++;this.needsRecovery=true;this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.editingThreads.clear();this.finishedTurns.clear();this.recentCompletions=[];this.earlyCompletions.clear();this.earlyApprovals.clear();this.subscribed.clear();this.emit('event',{type:'connection',error:error.message});});
+    client.on('disconnect',error=>{this.connectionEpoch++;this.needsRecovery=true;this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.editingThreads.clear();this.finishedTurns.clear();this.recentCompletions=[];this.earlyCompletions.clear();this.earlyApprovals.clear();this.subscribed.clear();this.freshEmptyThreads.clear();this.emit('event',{type:'connection',error:error.message});});
     client.on('warning',message=>this.emit('event',{type:'warning',text:message}));
   }
   async start(){
@@ -240,6 +240,17 @@ export class CodexService extends EventEmitter {
     let response;
     try {response=await this.client.request('thread/read',{threadId:id,includeTurns:true},{timeoutMs:60000});}
     catch(error){
+      // Some paginated stores reject full history for a brand-new thread with
+      // -32601: "list_turns is not supported yet". Treat it as empty ONLY if
+      // this App Server process just created the ID, no turn has begun, and
+      // an independent metadata-only read still confirms idle/no preview.
+      // Never invent empty history for an arbitrary persisted/Desktop thread.
+      if(error.code===-32601&&/list_turns is not supported yet/i.test(error.message)&&
+         this.freshEmptyThreads.has(id)){
+        const meta=await this.readThreadForTurn(id);
+        if(meta.rawStatus?.type==='idle'&&!meta.thread.preview)
+          return {...meta,messages:[]};
+      }
       if(!/not materialized yet.*includeTurns|rollout .* is empty/.test(error.message))throw error;
       const thread=this.knownThreads.get(id)||(await this.listThreads({all:true})).threads.find(item=>item.id===id);
       if(!thread)throw error;
@@ -292,7 +303,7 @@ export class CodexService extends EventEmitter {
     if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。再度新規作成してください'),{status:409});
     if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
     const result=await this.client.request('thread/start',{cwd,approvalPolicy:'on-request',approvalsReviewer:'user',sandbox:editing?'workspace-write':'read-only',ephemeral:false,...(preferred?{model:preferred}:{})});
-    const thread={...simplifyThread(result.thread),cwd:result.thread?.cwd||cwd};this.subscribed.add(thread.id);this.knownThreads.set(thread.id,thread);
+    const thread={...simplifyThread(result.thread),cwd:result.thread?.cwd||cwd};this.subscribed.add(thread.id);this.knownThreads.set(thread.id,thread);this.freshEmptyThreads.add(thread.id);
     this.emit('event',{type:'thread',threadId:thread.id,thread});
     return {thread};
   }
@@ -341,6 +352,7 @@ export class CodexService extends EventEmitter {
         {type:'readOnly',networkAccess:false}},{timeoutMs:60000}));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       const turnId=result?.turn?.id;
+      this.freshEmptyThreads.delete(threadId);
       const early=this.earlyCompletions.get(threadId)?.get(turnId);
       this.earlyCompletions.delete(threadId);
       const completedEarly=early||null;
