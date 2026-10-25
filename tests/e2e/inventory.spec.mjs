@@ -368,8 +368,31 @@ test('failed Codex submission retains the unsent draft and does not create a fal
   await page.locator('#prompt').fill('retry this draft');
   await page.locator('#run').click();
   await expect(page.locator('#notice')).toContainText('実行を開始できません');
+  await expect(page.locator('#notice')).toContainText('[TURN_REJECTED]');
   await expect(page.locator('#prompt')).toHaveValue('retry this draft');
   await expect(page.locator('#log')).not.toContainText('retry this draft');
+  await expect(page.locator('#stop')).toBeDisabled();
+});
+
+test('turn rejection shows actionable category without raw workspace secrets (@mock)',async({page})=>{
+  box=await sandbox();
+  const {url}=await box.start();
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await createChat(page);
+  const unsafePath='C:\\\\Users\\\\synthetic-private\\\\ProjectSecret';
+  await page.route('**/api/threads/*/turn',route=>route.fulfill({
+    status:409,contentType:'application/json',
+    body:JSON.stringify({error:'別プロジェクトのチャットです '+unsafePath+' token-secret'})
+  }));
+  await page.locator('#prompt').fill('synthetic unchanged draft');
+  await page.locator('#run').click();
+  await expect(page.locator('#notice')).toContainText('[WORKSPACE_MISMATCH]');
+  await expect(page.locator('#notice')).toContainText('所属プロジェクト');
+  await expect(page.locator('#notice')).not.toContainText('synthetic-private');
+  await expect(page.locator('#notice')).not.toContainText('token-secret');
+  await expect(page.locator('#prompt')).toHaveValue('synthetic unchanged draft');
+  await expect(page.locator('#log')).not.toContainText('synthetic unchanged draft');
   await expect(page.locator('#stop')).toBeDisabled();
 });
 
