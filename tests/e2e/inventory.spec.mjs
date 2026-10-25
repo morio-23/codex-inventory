@@ -368,7 +368,10 @@ test('failed Codex submission retains the unsent draft and does not create a fal
   await page.locator('#prompt').fill('retry this draft');
   await page.locator('#run').click();
   await expect(page.locator('#notice')).toContainText('実行を開始できません');
-  await expect(page.locator('#notice')).toContainText('[TURN_REJECTED]');
+  // Mock RPC -32600 is a turn/start rejection. Verify the phase-rich
+  // diagnostic instead of the legacy category-only bracket.
+  await expect(page.locator('#notice'))
+    .toContainText('[TURN_REJECTED / TURN_START_RPC / RPC -32600]');
   await expect(page.locator('#prompt')).toHaveValue('retry this draft');
   await expect(page.locator('#log')).not.toContainText('retry this draft');
   await expect(page.locator('#stop')).toBeDisabled();
