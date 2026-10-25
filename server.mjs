@@ -24,6 +24,7 @@ const assets=new Map([
   ['/split-pane.js',['public/split-pane.js','text/javascript; charset=utf-8']],
   ['/activity-feed-state.js',['public/activity-feed-state.js','text/javascript; charset=utf-8']],
   ['/display-labels.js',['public/display-labels.js','text/javascript; charset=utf-8']],
+  ['/turn-error-ui.js',['public/turn-error-ui.js','text/javascript; charset=utf-8']],
   ['/conflict-warning-state.js',['public/conflict-warning-state.js','text/javascript; charset=utf-8']],
   ['/markdown.js',['public/markdown.js','text/javascript; charset=utf-8']],
   ['/inventory-state.js',['public/inventory-state.js','text/javascript; charset=utf-8']],
