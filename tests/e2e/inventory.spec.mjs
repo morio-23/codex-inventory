@@ -377,6 +377,23 @@ test('failed Codex submission retains the unsent draft and does not create a fal
   await expect(page.locator('#stop')).toBeDisabled();
 });
 
+test('fresh paginated chat can send first mock turn despite full history -32601 (@mock)',async({page})=>{
+  box=await sandbox();
+  const {url}=await box.start({MOCK_PAGINATED_EMPTY_READ:'1'});
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  const id=await createChat(page);
+  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  await expect(page.locator('#editing')).not.toBeChecked();
+  await runPrompt(page,'SYNTHETIC_PAGINATED_FIRST_TURN');
+  await expectAnswer(page,'SYNTHETIC_PAGINATED_FIRST_TURN');
+  await expect(page.locator('#notice')).not.toContainText('THREAD_READ');
+  const stored=JSON.parse(await readFile(box.store,'utf8'));
+  const record=stored.threads.find(thread=>thread.id===id);
+  expect(record.turns).toHaveLength(1);
+  expect(record.turns[0].status).toBe('completed');
+});
+
 test('turn rejection shows actionable category without raw workspace secrets (@mock)',async({page})=>{
   box=await sandbox();
   const {url}=await box.start();
