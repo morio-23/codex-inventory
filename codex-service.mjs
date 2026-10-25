@@ -287,11 +287,20 @@ export class CodexService extends EventEmitter {
     await this.client.request('thread/resume',{threadId},{timeoutMs:60000});
     this.subscribed.add(threadId);
   }
+  // Only an enumerated stage identifier may be surfaced to the renderer.
+  // Do not store or display the raw Codex RPC error, paths or prompt.
+  async #turnPhase(stage,operation){
+    try{return await operation();}
+    catch(error){
+      if(error&&typeof error==='object')error.turnStage=stage;
+      throw error;
+    }
+  }
   async startTurn({threadId,prompt,action='quest',editing=false,model=null,effort=null,workspace=null}) {
-    await this.start();
+    await this.#turnPhase('APP_SERVER_INIT',()=>this.start());
     const epoch=this.connectionEpoch;
-    const cwd=workspace?await this.validateWorkspace(workspace):this.workspace;
-    if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409});
+    const cwd=workspace?await this.#turnPhase('WORKSPACE_CHECK',()=>this.validateWorkspace(workspace)):this.workspace;
+    if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409,turnStage:'WORKSPACE_CHECK'});
     if(!threadId||typeof prompt!=='string'||!prompt.trim()||prompt.length>10000||!Object.hasOwn(taskInstructions,action)) throw new Error('任務の内容が不正です');
     if((action==='fix'||action==='build')&&!editing)throw new Error('実装・修正には編集許可が必要です');
     if(this.running.has(threadId))throw new Error('このスレッドは実行中です');
@@ -299,22 +308,22 @@ export class CodexService extends EventEmitter {
     if(editing)this.editingThreads.add(threadId);
     this.#emitActivityState();
     try {
-      const record=await this.readThread(threadId);
+      const record=await this.#turnPhase('THREAD_READ',()=>this.readThread(threadId));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       if(!sameWorkspace(record.thread?.cwd,cwd)) throw Object.assign(new Error('別プロジェクトのチャットです。画面で所属プロジェクトを選択してください。'),{status:409});
       if(record.rawStatus?.type==='active')throw Object.assign(new Error('このスレッドは別のクライアントで実行中です'),{status:409});
-      const selection=await this.selectedModel({model,effort});
+      const selection=await this.#turnPhase('MODEL_SELECTION',()=>this.selectedModel({model,effort}));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
-      await this.ensureSubscribed(threadId);
+      await this.#turnPhase('THREAD_RESUME',()=>this.ensureSubscribed(threadId));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
-      await this.validateWorkspace(cwd);
-      if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409});
+      await this.#turnPhase('WORKSPACE_CHECK',()=>this.validateWorkspace(cwd));
+      if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409,turnStage:'WORKSPACE_CHECK'});
       const text=action==='quest'?prompt.trim():`${taskInstructions[action]}\n\n【ユーザー依頼】\n${prompt.trim()}`;
       const input=[{type:'text',text,text_elements:[]}];
-      const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',approvalsReviewer:'user',sandboxPolicy:editing?
+      const result=await this.#turnPhase('TURN_START_RPC',()=>this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',approvalsReviewer:'user',sandboxPolicy:editing?
         {type:'workspaceWrite',writableRoots:[cwd],networkAccess:false,
           excludeTmpdirEnvVar:true,excludeSlashTmp:true}:
-        {type:'readOnly',networkAccess:false}},{timeoutMs:60000});
+        {type:'readOnly',networkAccess:false}},{timeoutMs:60000}));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       const turnId=result?.turn?.id;
       const early=this.earlyCompletions.get(threadId)?.get(turnId);
