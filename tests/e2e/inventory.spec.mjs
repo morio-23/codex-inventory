@@ -1738,6 +1738,8 @@ test('project folder names display while parent paths stay private (@mock)',asyn
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
   await expect(page.locator('#workspace')).toHaveText('beta');
   await expect(page.locator('#active-thread')).toHaveText('Beta project');
+  await expect(page.locator('.thread-item')).toHaveCount(1);
+  await expect(page.locator('.thread-item')).toHaveAttribute('title','Beta project');
   for(const selector of ['#workspace','#project-select','#project-hint','#thread-list','#active-thread']){
     const value=await page.locator(selector).textContent();
     expect(value).not.toContain('ANSWER_');
@@ -1754,9 +1756,14 @@ test('project folder names display while parent paths stay private (@mock)',asyn
   await expect(page.locator('#project-select')).toContainText('beta · 1 chats');
   await page.reload();
   await expect(page.locator('#workspace')).toHaveText('alpha');
+  await expect(page.locator('#active-thread')).toHaveText('Alpha project');
   const chatTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
-  expect(chatTitles).toContain('Beta project');
-  expect(chatTitles.every(title=>title==='Alpha project'||title==='Beta project')).toBe(true);
+  // Project-scoped view must not show the other project's chat.
+  expect(chatTitles).toEqual(['Alpha project']);
+  await page.locator('#show-all').check();
+  await expect(page.locator('.thread-item')).toHaveCount(2);
+  const allTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
+  expect(allTitles).toEqual(expect.arrayContaining(['Alpha project','Beta project']));
 });
 
 test('three chats across two workspaces keep activity, approvals and stops correctly scoped (@mock)',async({page})=>{
