@@ -54,9 +54,22 @@ export function classifyTurnError(error) {
   for(const [code,pattern] of MATCHES)if(pattern.test(raw))return code;
   return 'TURN_REJECTED';
 }
+// Only these fixed labels and bounded numeric codes can appear in the UI.
+// Do not interpolate message, paths, prompt, or arbitrary server properties.
+const PUBLIC_TURN_STAGES=new Set([
+  'APP_SERVER_INIT','WORKSPACE_SCOPE','WORKSPACE_CHECK','THREAD_READ',
+  'MODEL_SELECTION','THREAD_RESUME','TURN_START_RPC'
+]);
 export function turnFailureNotice(error,language='ja') {
   const category=classifyTurnError(error);
-  const message=CATEGORIES[category][String(language).toLowerCase().startsWith('en')?1:0];
-  return {category,text:(String(language).toLowerCase().startsWith('en')?'Could not start the request':'実行を開始できません')+
-    ' ['+category+'] '+message};
+  const english=String(language).toLowerCase().startsWith('en');
+  const message=CATEGORIES[category][english?1:0];
+  const stage=PUBLIC_TURN_STAGES.has(error?.turnStage)?error.turnStage:null;
+  const rpcCode=Number.isSafeInteger(error?.rpcCode)&&
+    error.rpcCode<0&&error.rpcCode>=-32768?error.rpcCode:null;
+  const signature=[category,...(stage?[stage]:[]),
+    ...(rpcCode!==null?['RPC '+rpcCode]:[])].join(' / ');
+  return {category,stage,rpcCode,
+    text:(english?'Could not start the request':'実行を開始できません')+
+      ' ['+signature+'] '+message};
 }
