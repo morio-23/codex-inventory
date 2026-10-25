@@ -35,3 +35,21 @@ test('unsafe or malformed failure details always produce generic fixed messaging
     assert.match(result.text,/実行を開始できません/);
   }
 });
+
+test('diagnostic includes allowlisted stage and numeric RPC code but no unsafe fields',()=>{
+  const failure=new Error('C:\\\\Users\\\\secret-name\\\\auth-token SECRET');
+  failure.turnStage='TURN_START_RPC';
+  failure.rpcCode=-32602;
+  const shown=turnFailureNotice(failure,'ja');
+  assert.equal(shown.category,'TURN_REJECTED');
+  assert.equal(shown.stage,'TURN_START_RPC');
+  assert.equal(shown.rpcCode,-32602);
+  assert.match(shown.text,/\[TURN_REJECTED \/ TURN_START_RPC \/ RPC -32602\]/);
+  assert.doesNotMatch(shown.text,/secret-name|auth-token|Users|SECRET/);
+  failure.turnStage='C:\\\\Users\\\\leaked';
+  failure.rpcCode='-32602';
+  const unsafe=turnFailureNotice(failure);
+  assert.equal(unsafe.stage,null);
+  assert.equal(unsafe.rpcCode,null);
+  assert.match(unsafe.text,/\[TURN_REJECTED\]/);
+});
