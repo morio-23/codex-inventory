@@ -368,3 +368,34 @@ test('network permission denial sends an empty permission profile',async t=>{
   service.respondApproval({approvalId:approval.approvalId,decision:'decline',workspace:process.cwd()});
   assert.equal((await finished).status,'failed');
 });
+
+test('a mock RPC turn rejection is tagged with a precise safe stage',async t=>{
+  const {client,service}=await harness({MOCK_FAIL_METHODS:'turn/start'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread();
+  await assert.rejects(
+    ()=>service.startTurn({threadId:thread.id,prompt:'synthetic read-only request',editing:false}),
+    error=>{
+      assert.equal(error.turnStage,'TURN_START_RPC');
+      assert.equal(service.running.size,0);
+      return true;
+    });
+});
+
+test('failure before turn/start is tagged THREAD_RESUME without starting a turn',async t=>{
+  const {client,service}=await harness();
+  t.after(()=>client.close());
+  const {thread}=await service.createThread();
+  service.subscribed.delete(thread.id);
+  const original=client.request.bind(client);
+  let turnStarts=0;
+  client.request=(method,params,options)=>{
+    if(method==='thread/resume')throw new Error('synthetic private resume failure');
+    if(method==='turn/start')turnStarts++;
+    return original(method,params,options);
+  };
+  await assert.rejects(
+    ()=>service.startTurn({threadId:thread.id,prompt:'synthetic no-op request',editing:false}),
+    error=>error.turnStage==='THREAD_RESUME');
+  assert.equal(turnStarts,0);
+});
