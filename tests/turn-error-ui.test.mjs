@@ -11,6 +11,7 @@ test('only fixed diagnostic categories are returned for common Codex failures',(
     ['実装・修正には編集許可が必要です','EDIT_PERMISSION_REQUIRED'],
     ['接続が切り替わりました','CONNECTION_CHANGED'],
     ['turn/start がタイムアウトしました','REQUEST_TIMEOUT'],
+    ["invalid params: missing field 'networkAccess' in sandboxPolicy",'INVALID_SANDBOX_POLICY'],
     ['Mock failure: turn/start','TURN_REJECTED']
   ];
   for(const [message,expected] of examples)
