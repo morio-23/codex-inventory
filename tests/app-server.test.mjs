@@ -411,12 +411,15 @@ test('new turn uses metadata-only read when full history raises -32601',async t=
     return request(method,params,options);
   };
   // Reproduce real paginated-store behavior before any turn exists.
-  await assert.rejects(()=>service.readThread(thread.id),
-    error=>error.code===-32601 && /list_turns is not supported yet/.test(error.message));
+  // UI may show empty history for a newly created thread only when a second
+  // metadata-only read confirms its idle state and lack of a preview.
+  const empty=await service.readThread(thread.id);
+  assert.deepEqual(empty.messages,[]);
+  assert.equal(empty.thread.id,thread.id);
   const created=await service.startTurn({
     threadId:thread.id,prompt:'Synthetic first read-only turn',editing:false});
   assert.ok(created.turnId);
-  assert.deepEqual(reads,[true,false]);
+  assert.deepEqual(reads,[true,false,false]);
   await complete(service,thread.id);
   const history=await service.readThread(thread.id);
   assert.equal(history.messages[0].role,'user');
@@ -442,4 +445,14 @@ test('failed metadata-only guard never calls turn/start or trusts cached thread 
     error=>error.code===-32601&&error.turnStage==='THREAD_READ');
   assert.equal(turnStarts,0);
   assert.equal(service.running.size,0);
+});
+
+test('existing paginated history -32601 never becomes a fabricated empty transcript',async t=>{
+  const {client,service}=await harness({MOCK_PAGINATED_EMPTY_READ:'1'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:false});
+  // Simulate an existing/restored thread: provenance of fresh creation is gone.
+  service.freshEmptyThreads.delete(thread.id);
+  await assert.rejects(()=>service.readThread(thread.id),
+    error=>error.code===-32601 && /list_turns is not supported yet/.test(error.message));
 });
