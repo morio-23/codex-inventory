@@ -1422,19 +1422,25 @@ test('secondary controls and log scroll belong to each chat (@mock)',async({page
   await page.locator('#secondary-prompt').fill('draft for second');
   await page.locator('#secondary-model').selectOption('mock-deep');
   await page.locator('#secondary-effort').selectOption('high');
-  await page.locator('#secondary-action').selectOption('review');
+  // The visible radio tile is the user-facing control. The underlying select
+  // is intentionally hidden and remains the API/state source of truth.
+  await page.locator('#secondary-action-options [data-action="review"]').click();
+  await expect(page.locator('#secondary-action')).toHaveValue('review');
+  await expect(page.locator('#secondary-action-options [data-action="review"]')).toHaveAttribute('aria-checked','true');
   await page.locator('#secondary-editing').check();
   await page.locator('#secondary-thread').selectOption(third);
   await page.locator('#secondary-prompt').fill('draft for third');
   await expect(page.locator('#secondary-model')).toHaveValue('');
   await expect(page.locator('#secondary-effort')).toHaveValue('');
   await expect(page.locator('#secondary-action')).toHaveValue('quest');
+  await expect(page.locator('#secondary-action-options [data-action="quest"]')).toHaveAttribute('aria-checked','true');
   await expect(page.locator('#secondary-editing')).not.toBeChecked();
   await page.locator('#secondary-thread').selectOption(second);
   await expect(page.locator('#secondary-prompt')).toHaveValue('draft for second');
   await expect(page.locator('#secondary-model')).toHaveValue('mock-deep');
   await expect(page.locator('#secondary-effort')).toHaveValue('high');
   await expect(page.locator('#secondary-action')).toHaveValue('review');
+  await expect(page.locator('#secondary-action-options [data-action="review"]')).toHaveAttribute('aria-checked','true');
   await expect(page.locator('#secondary-editing')).toBeChecked();
   await page.locator('#secondary-prompt').fill('a reply to scroll beyond the top');
   await page.locator('#secondary-send').click();
@@ -1451,6 +1457,53 @@ test('secondary controls and log scroll belong to each chat (@mock)',async({page
   await page.locator('#secondary-thread').selectOption(third);
   await page.locator('#secondary-thread').selectOption(second);
   await expect.poll(()=>scroll.evaluate(element=>element.scrollTop)).toBe(storedTop);
+});
+
+test('split action palette supports keyboard, languages, per-thread state and independent editing (@mock)',async({page})=>{
+  box=await sandbox();
+  const {url}=await box.start();
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  const primary=await createChat(page);
+  const secondary=await createChat(page);
+  const third=await createChat(page);
+  await page.locator(`.thread-item[data-thread-id="${primary}"]`).click();
+  await page.locator('#split-toggle').click();
+  await page.locator('#secondary-thread').selectOption(secondary);
+  await page.locator('#ui-language').selectOption('ja');
+  const radio=value=>page.locator(`#secondary-action-options [data-action="${value}"]`);
+  await expect(radio('quest')).toHaveAttribute('aria-checked','true');
+  await expect(page.locator('#secondary-action')).toHaveValue('quest');
+  await page.locator('#secondary-prompt').fill('synthetic unchanged draft');
+  await radio('review').click();
+  await expect(radio('review')).toHaveAttribute('aria-checked','true');
+  await expect(radio('quest')).toHaveAttribute('aria-checked','false');
+  await expect(page.locator('#secondary-action')).toHaveValue('review');
+  await expect(page.locator('#secondary-action-help')).toContainText('レビュー');
+  await radio('review').press('ArrowRight');
+  await expect(radio('map')).toHaveAttribute('aria-checked','true');
+  await expect(radio('map')).toBeFocused();
+  await radio('map').press('Home');
+  await expect(radio('quest')).toHaveAttribute('aria-checked','true');
+  await radio('build').click();
+  await expect(page.locator('#secondary-action-help')).toContainText('編集許可');
+  await expect(page.locator('#secondary-editing')).not.toBeChecked();
+  await expect(page.locator('#secondary-prompt')).toHaveValue('synthetic unchanged draft');
+  await page.locator('#secondary-thread').selectOption(third);
+  await expect(radio('quest')).toHaveAttribute('aria-checked','true');
+  await page.locator('#secondary-thread').selectOption(secondary);
+  await expect(radio('build')).toHaveAttribute('aria-checked','true');
+  await page.locator('#ui-language').selectOption('en');
+  await expect(radio('build')).toContainText('Build');
+  await expect(page.locator('#secondary-action-help')).toContainText('Requires file editing permission');
+  await expect(page.locator('#secondary-action')).toHaveValue('build');
+  await page.locator('#ui-language').selectOption('ja');
+  await expect(radio('build')).toContainText('実装');
+  for(const width of [390,768,1280]){
+    await page.setViewportSize({width,height:900});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),
+      'action chooser caused horizontal overflow at '+width).toBeLessThanOrEqual(1);
+  }
 });
 
 test('mobile split tabs show one chat and preserve an active turn (@mock)',async({page})=>{
@@ -1548,8 +1601,25 @@ test('SSE reconnect reloads a secondary chat that completed while events were un
 test('a stale secondary history response cannot erase a newer SSE reply (@mock)',async({page})=>{
   box=await seededProjects();
   const {url}=await box.start({CODEX_WORKSPACE:''});
+  // The E2E harness considers the HTTP listener ready as soon as GET /
+  // succeeds, but Codex mock initialize and project discovery continue
+  // asynchronously. Check the backend readiness *independently* before
+  // starting this renderer/SSE race test; fail with a specific stage rather
+  // than attributing backend startup latency to SSE history reconciliation.
+  await expect.poll(async()=>{
+    try{
+      const response=await page.request.get(url+'/api/status',{timeout:4000});
+      if(!response.ok())return 'HTTP_'+response.status();
+      const status=await response.json();
+      return status.connected===true?'READY':'MOCK_APP_SERVER_NOT_READY';
+    }catch{return 'MOCK_STATUS_UNREACHABLE';}
+  },{message:'mock backend initialization before secondary SSE race',timeout:20000,
+    intervals:[200,500,1000]}).toBe('READY');
+  const rendererErrors=[];
+  page.on('pageerror',error=>rendererErrors.push(error.message));
   await page.goto(url);
-  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY',{timeout:15000});
+  expect(rendererErrors).toEqual([]);
   await page.locator('#split-toggle').click();
   await page.locator('#secondary-thread').selectOption('mock-alpha-auto');
   await expect(page.locator('#secondary-log')).toContainText('ANSWER_ALPHA');

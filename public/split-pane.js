@@ -21,6 +21,9 @@ export class SplitPane {
     this.effort=document.getElementById('secondary-effort');
     this.editing=document.getElementById('secondary-editing');
     this.action=document.getElementById('secondary-action');
+    this.actionOptions=Array.from(document.querySelectorAll('#secondary-action-options [data-action]'));
+    this.actionHelp=document.getElementById('secondary-action-help');
+    this.actionTitle=document.getElementById('secondary-action-title');
     this.output=document.getElementById('secondary-log');
     this.threadId=null;
     this.workspace='';
@@ -37,6 +40,24 @@ export class SplitPane {
     this.model.addEventListener('change',()=>{this.fillModels(true);this.saveChatState();});
     for(const control of [this.prompt,this.effort,this.editing,this.action])
       control.addEventListener(control===this.prompt?'input':'change',()=>this.saveChatState());
+    // The select remains the existing wire/state source of truth. Tiles mirror
+    // it so keyboard use, restoration and legacy selectOption calls agree.
+    this.action.addEventListener('change',()=>this.syncActionOptions());
+    this.actionOptions.forEach((button,index)=>{
+      button.addEventListener('click',()=>this.setAction(button.dataset.action));
+      button.addEventListener('keydown',event=>{
+        const direction=['ArrowRight','ArrowDown'].includes(event.key)?1:
+          ['ArrowLeft','ArrowUp'].includes(event.key)?-1:null;
+        const next=event.key==='Home'?0:event.key==='End'?this.actionOptions.length-1:
+          direction===null?null:(index+direction+this.actionOptions.length)%this.actionOptions.length;
+        if(next===null)return;
+        event.preventDefault();
+        const target=this.actionOptions[next];
+        this.setAction(target.dataset.action);
+        target.focus();
+      });
+    });
+    document.addEventListener('inventory-language-change',()=>this.syncActionOptions());
     this.output.addEventListener('scroll',()=>{
       if(this.threadId)this.stateFor(this.threadId).scrollTop=this.output.scrollTop;
     });
@@ -85,6 +106,36 @@ export class SplitPane {
     this.setWidth(this.width,false);
     this.applyLayout();
     this.fillModels(false);
+    this.syncActionOptions();
+  }
+  setAction(action){
+    if(!this.actionOptions.some(button=>button.dataset.action===action))return;
+    this.action.value=action;
+    this.action.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  syncActionOptions(){
+    const english=this.getLanguage()==='en';
+    const catalog={
+      quest:['自由依頼','Freeform','内容を自由に依頼','Write any task'],
+      inspect:['調査','Inspect','調査・分析を依頼','Investigate or analyze'],
+      build:['実装','Build','編集許可が必要','Requires file editing permission'],
+      fix:['修正','Fix','編集許可が必要','Requires file editing permission'],
+      test:['テスト','Test','テスト・検証を依頼','Run tests or checks'],
+      review:['レビュー','Review','変更点をレビュー','Review changes'],
+      map:['構成把握','Map','コード構成を調べる','Explore code structure']
+    };
+    const selected=catalog[this.action.value]?''+this.action.value:'quest';
+    this.actionTitle.textContent=english?'Action':'アクション';
+    this.actionHelp.textContent=catalog[selected][english?3:2];
+    for(const button of this.actionOptions){
+      const entry=catalog[button.dataset.action];
+      if(!entry)continue;
+      const checked=button.dataset.action===selected;
+      button.setAttribute('aria-checked',String(checked));
+      button.tabIndex=checked?0:-1;
+      button.querySelector('[data-i18n-ignore]').textContent=entry[english?1:0];
+      button.title=entry[english?3:2];
+    }
   }
   stateFor(id){
     if(!this.chatState.has(id))this.chatState.set(id,{draft:'',model:'',effort:'',editing:false,action:'quest',scrollTop:0});
@@ -105,6 +156,7 @@ export class SplitPane {
     this.effort.value=state.effort;
     this.editing.checked=state.editing;
     this.action.value=state.action;
+    this.syncActionOptions();
   }
   setWidth(value,persist=true){
     this.width=Math.max(28,Math.min(72,Math.round(value)));
