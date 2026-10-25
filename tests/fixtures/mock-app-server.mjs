@@ -98,6 +98,11 @@ async function handle(packet){
   }
   if(method==='thread/read'){
     const t=threads.get(params.threadId);if(!t)return fail(id,'Thread not found');
+    // Reproduce paginated local Codex stores where a full-history read on
+    // an unmaterialized/turnless thread invokes unsupported list_turns.
+    // Metadata-only thread/read still succeeds and must be used for guards.
+    if(params.includeTurns&&t.turns.length===0&&process.env.MOCK_PAGINATED_EMPTY_READ==='1')
+      return fail(id,'list_turns is not supported yet',-32601);
     if(params.includeTurns && !t.turns.length)return fail(id,process.env.MOCK_EMPTY_ROLLOUT==='1'
       ? `failed to read thread: thread-store internal error: rollout at mock is empty`
       : `thread ${t.id} is not materialized yet; includeTurns is unavailable before first user message`);
