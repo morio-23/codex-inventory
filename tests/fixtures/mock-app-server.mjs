@@ -115,7 +115,18 @@ async function handle(packet){
       const options=params.model==='mock-deep'?['high','xhigh','ultra']:['low','medium','high'];
       if(!options.includes(params.effort))return fail(id,'Unsupported model/effort combination');
     }
-    if(!['readOnly','workspaceWrite'].includes(params.sandboxPolicy?.type))return fail(id,'Invalid turn sandbox policy');
+    // Match the required v2 SandboxPolicy fields in Codex CLI 0.144.5–0.164.0.
+    // Previously this mock checked only the variant name, so tests falsely
+    // accepted a payload that a real App Server rejects on deserialization.
+    const policy=params.sandboxPolicy;
+    const validPolicy=policy?.type==='readOnly'?
+      typeof policy.networkAccess==='boolean':
+      policy?.type==='workspaceWrite'&&Array.isArray(policy.writableRoots)&&
+        policy.writableRoots.length>0&&policy.writableRoots.every(x=>typeof x==='string'&&x.length>0)&&
+        typeof policy.networkAccess==='boolean'&&
+        typeof policy.excludeTmpdirEnvVar==='boolean'&&
+        typeof policy.excludeSlashTmp==='boolean';
+    if(!validPolicy)return fail(id,'Invalid turn sandbox policy');
     const t=threads.get(params.threadId);if(!t)return fail(id,'Thread not found');
     if(active.has(t.id))return fail(id,'Thread already running');
     const message=params.input?.[0]?.text||'';
