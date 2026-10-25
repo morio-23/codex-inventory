@@ -1422,7 +1422,10 @@ test('secondary controls and log scroll belong to each chat (@mock)',async({page
   await page.locator('#secondary-prompt').fill('draft for second');
   await page.locator('#secondary-model').selectOption('mock-deep');
   await page.locator('#secondary-effort').selectOption('high');
-  await page.locator('#secondary-action').selectOption('review');
+  // The visible radio tile is the user-facing control. The underlying select
+  // is intentionally hidden and remains the API/state source of truth.
+  await page.locator('#secondary-action-options [data-action="review"]').click();
+  await expect(page.locator('#secondary-action')).toHaveValue('review');
   await expect(page.locator('#secondary-action-options [data-action="review"]')).toHaveAttribute('aria-checked','true');
   await page.locator('#secondary-editing').check();
   await page.locator('#secondary-thread').selectOption(third);
@@ -1430,12 +1433,14 @@ test('secondary controls and log scroll belong to each chat (@mock)',async({page
   await expect(page.locator('#secondary-model')).toHaveValue('');
   await expect(page.locator('#secondary-effort')).toHaveValue('');
   await expect(page.locator('#secondary-action')).toHaveValue('quest');
+  await expect(page.locator('#secondary-action-options [data-action="quest"]')).toHaveAttribute('aria-checked','true');
   await expect(page.locator('#secondary-editing')).not.toBeChecked();
   await page.locator('#secondary-thread').selectOption(second);
   await expect(page.locator('#secondary-prompt')).toHaveValue('draft for second');
   await expect(page.locator('#secondary-model')).toHaveValue('mock-deep');
   await expect(page.locator('#secondary-effort')).toHaveValue('high');
   await expect(page.locator('#secondary-action')).toHaveValue('review');
+  await expect(page.locator('#secondary-action-options [data-action="review"]')).toHaveAttribute('aria-checked','true');
   await expect(page.locator('#secondary-editing')).toBeChecked();
   await page.locator('#secondary-prompt').fill('a reply to scroll beyond the top');
   await page.locator('#secondary-send').click();
