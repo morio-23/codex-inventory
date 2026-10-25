@@ -7,7 +7,7 @@ const expectedVersion='0.7.0-beta.1';
 const expectedSetup='CodexInventory-Setup-${version}-${arch}.${ext}';
 const expectedPortable='CodexInventory-Portable-${version}-${arch}.${ext}';
 
-export function validateLocalBuildVersion({root,rootLock,desktop,desktopLock,appServerSource}){
+export function validateLocalBuildVersion({root,rootLock,desktop,desktopLock,appServerSource,htmlSource,serverSource}){
   const versions=[root?.version,rootLock?.version,rootLock?.packages?.['']?.version,
     desktop?.version,desktopLock?.version,desktopLock?.packages?.['']?.version];
   if(!versions.every(version=>version===expectedVersion)){
@@ -29,6 +29,14 @@ export function validateLocalBuildVersion({root,rootLock,desktop,desktopLock,app
   if(!appServerSource.includes("version:'"+expectedVersion+"'")){
     throw new Error('BUILD_RPC_CLIENT_VERSION_MISMATCH');
   }
+  // A stale hardcoded v0.6 UI banner hid whether a newly built EXE was being
+  // tested. Guard the visible version and the server's startup banner too.
+  if(typeof htmlSource!=='string' ||
+    !htmlSource.includes('LOCAL CODEX CONTROLLER / V'+expectedVersion.toUpperCase()) ||
+    typeof serverSource!=='string' ||
+    !serverSource.includes('Codex Inventory v'+expectedVersion+': http://')){
+    throw new Error('BUILD_VISIBLE_VERSION_MISMATCH');
+  }
   return expectedVersion;
 }
 
@@ -39,7 +47,9 @@ function loadInputs(rootPath=repoRoot){
     rootLock:json('package-lock.json'),
     desktop:json('desktop/package.json'),
     desktopLock:json('desktop/package-lock.json'),
-    appServerSource:readFileSync(join(rootPath,'app-server-client.mjs'),'utf8')
+    appServerSource:readFileSync(join(rootPath,'app-server-client.mjs'),'utf8'),
+    htmlSource:readFileSync(join(rootPath,'public/index.html'),'utf8'),
+    serverSource:readFileSync(join(rootPath,'server.mjs'),'utf8')
   };
 }
 

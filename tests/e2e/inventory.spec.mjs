@@ -73,7 +73,7 @@ async function openTemplates(page){
 }
 async function untranslatedChrome(page){
   return page.evaluate(()=>{
-    const ignored='#ui-language,#reset-credit-choice,#reset-credit-review-details,.thread-name,#log .log-content,#log .command-preview,#log .command-full,#prompt,#template-variables,#local-result-text,[data-i18n-ignore]';
+    const ignored='#ui-language,#reset-credit-choice,#reset-credit-review-details,.thread-item,.thread-name,#log .log-content,#log .command-preview,#log .command-full,#prompt,#template-variables,#local-result-text,[data-i18n-ignore]';
     const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
     const rows=[];
     for(let node=walker.nextNode();node;node=walker.nextNode()){
@@ -100,6 +100,10 @@ async function untranslatedChrome(page){
 }
 
 test('English auto-detection, reversible language switch, saved preference, ticket safety and templates',async({browser})=>{
+  // This test deliberately visits every inventory card and tooltip, exercises
+  // four viewport widths and verifies mock ticket/locale/template flows.
+  // Give only this comprehensive test a longer budget, not the whole suite.
+  test.setTimeout(120_000);
   box=await sandbox();
   const {url}=await box.start({MOCK_RESET_CREDITS:'1'});
   const context=await browser.newContext({locale:'en-US'});
@@ -116,22 +120,32 @@ test('English auto-detection, reversible language switch, saved preference, tick
     expect(await untranslatedChrome(english)).toContain('@placeholder: 未翻訳プレースホルダー');
     await english.locator('#prompt').evaluate(element=>element.setAttribute('placeholder','Example: Review this app and suggest improvements'));
     const residuals={initial:await untranslatedChrome(english)};
-    for(const category of await english.locator('#catalog-categories button').evaluateAll(nodes=>nodes.map(node=>node.dataset.category))){
-      await english.locator(`#catalog-categories [data-category="${category}"]`).click();
-      for(;;){
-        const ids=await english.locator('#slots [data-item]').evaluateAll(nodes=>nodes.map(node=>node.dataset.item));
-        for(const id of ids){
-          const slot=english.locator(`#slots [data-item="${id}"]`);
-          await slot.click();
-          residuals['item-'+id]=await untranslatedChrome(english);
-          await slot.hover();
-          residuals['tooltip-'+id]=await untranslatedChrome(english);
-          await english.mouse.move(0,0);
-        }
-        if(await english.locator('#catalog-next').isDisabled())break;
-        await english.locator('#catalog-next').click();
+    await test.step('English inventory and tooltip localization sweep',async()=>{
+      const categories=await english.locator('#catalog-categories button')
+        .evaluateAll(nodes=>nodes.map(node=>node.dataset.category));
+      for(const category of categories){
+        await test.step('Audit catalog '+category,async()=>{
+          await english.locator(`#catalog-categories [data-category="${category}"]`).click();
+          // Bound pagination to report a precise failure if the last page
+          // cannot be reached; do not hide loops behind a bigger timeout.
+          for(let pageIndex=0;pageIndex<20;pageIndex++){
+            const ids=await english.locator('#slots [data-item]')
+              .evaluateAll(nodes=>nodes.map(node=>node.dataset.item));
+            for(const id of ids){
+              const slot=english.locator(`#slots [data-item="${id}"]`);
+              await slot.click();
+              residuals['item-'+id]=await untranslatedChrome(english);
+              await slot.hover();
+              residuals['tooltip-'+id]=await untranslatedChrome(english);
+              await english.mouse.move(0,0);
+            }
+            if(await english.locator('#catalog-next').isDisabled())return;
+            await english.locator('#catalog-next').click();
+          }
+          throw new Error('E2E_CATALOG_PAGINATION_DID_NOT_TERMINATE');
+        });
       }
-    }
+    });
     const ticket=english.locator('#featured-item [data-item="reset-credit"]');
     await expect(ticket.locator('.slot-label')).toHaveText('Codex reset ticket');
     await expect(ticket.locator('.reset-ticket-count')).toHaveText('2 tickets');
@@ -772,11 +786,11 @@ test('without -Workspace, Inventory discovers App Server projects and changes ac
   await expect(page.locator('#project-select')).toBeEnabled();
   await expect(page.locator('#project-select option')).toHaveCount(2);
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('beta');
   const betaLabel=await page.locator('#workspace').textContent();
   await expect(page.locator('#log')).toContainText('ANSWER_BETA');
   await page.locator('#project-select').selectOption(box.alpha);
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('alpha');
   expect(await page.locator('#workspace').textContent()).not.toBe(betaLabel);
   await expect(page.locator('#log')).toContainText('ANSWER_ALPHA');
   await expect(page.locator('#log')).not.toContainText('ANSWER_BETA');
@@ -834,13 +848,12 @@ test('project hotbars are restored independently and old threads are never sent 
   await expect(page.locator('#hotbar button').first()).not.toHaveAttribute('data-item','review');
   await page.locator('#project-select').selectOption(box.beta);
   await expect(page.locator('#hotbar button').first()).toHaveAttribute('data-item','review');
-  // The beta project must restore its own chat, not the foreign alpha chat
-  // that was inspected in global history mode before switching away.
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  // The beta project must restore its own titled chat, never a foreign one.
+  await expect(page.locator('#active-thread')).toHaveText('Beta project');
   await expect(page.locator('#run')).toBeEnabled();
   await page.reload();
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  await expect(page.locator('#active-thread')).toHaveText('Beta project');
   await expect(page.locator('#run')).toBeEnabled();
 });
 
@@ -1140,7 +1153,7 @@ test('Unicode project paths can fetch history, create and resume a mock Codex tu
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
 
   await page.locator('#project-select').selectOption(box.alpha);
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('日本語 🌸 100% workspace');
   await expect(page.locator('#log')).toContainText('ANSWER_ALPHA');
   const thread=await createChat(page);
   await runPrompt(page,'Unicode workspace mock run');
@@ -1295,7 +1308,7 @@ test('Codex completion provides in-app and native bridge notifications once, wit
   expect(await page.evaluate(()=>window.testNativeCompletionCalls)).toEqual(['completed']);
   await page.locator('#completion-toast-open').click();
   await expect(page.locator('#completion-toast')).toBeHidden();
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  await expect(page.locator('#active-thread')).toHaveText(await page.locator('.thread-item.chosen .thread-name').textContent());
   await page.locator('#completion-notifications').uncheck();
   await page.reload();
   await expect(page.locator('#completion-notifications')).not.toBeChecked();
@@ -1650,7 +1663,7 @@ test('failed activity stays until acknowledged and duplicate completion stays si
   expect(response.status()).toBe(202);
   const row=page.locator('#activity-feed-list .activity-failed');
   await expect(row).toHaveCount(1);
-  await expect(row).toContainText('チャット1');
+  await expect(row).toContainText(/チャット1|synthetic failed turn/);
   await page.waitForTimeout(8500);
   await expect(row).toHaveCount(1);
   await expect(page.locator('#activity-feed-list .activity-dismiss')).toBeVisible();
@@ -1660,7 +1673,7 @@ test('failed activity stays until acknowledged and duplicate completion stays si
   await expect(row).toHaveCount(1);
   await expect(page.locator('#activity-feed-list .activity-dismiss')).toHaveCount(0);
   await row.click();
-  await expect(page.locator('#active-thread')).toHaveText('チャット1');
+  await expect(page.locator('#active-thread')).toHaveText(await page.locator('.thread-item.chosen .thread-name').textContent());
 });
 
 test('approval activity is deduplicated and clears when the request resolves (@mock)',async({page})=>{
@@ -1675,7 +1688,7 @@ test('approval activity is deduplicated and clears when the request resolves (@m
   expect(response.status()).toBe(202);
   const activity=page.locator('#activity-feed-list .activity-approval');
   await expect(activity).toHaveCount(1);
-  await expect(activity).toContainText('チャット1');
+  await expect(activity).toContainText(/チャット1|synthetic approval request/);
   await page.reload();
   await expect(activity).toHaveCount(1);
   await page.locator('#split-toggle').click();
@@ -1694,7 +1707,7 @@ test('approval activity is deduplicated and clears when the request resolves (@m
   await expect(activity).toHaveCount(0);
 });
 
-test('workspace conflict warning uses anonymous chat names and clears automatically (@mock)',async({page})=>{
+test('workspace conflict warning uses safe thread titles and clears automatically (@mock)',async({page})=>{
   box=await sandbox();const {url}=await box.start({MOCK_TURN_DELAY_MS:'3500'});
   await page.goto(url);
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
@@ -1710,8 +1723,8 @@ test('workspace conflict warning uses anonymous chat names and clears automatica
   await page.locator('#run').click();
   const warning=page.locator('#workspace-conflicts');
   await expect(warning).toBeVisible();
-  await expect(warning).toContainText('チャット1');
-  await expect(warning).toContainText('チャット2');
+  await expect(warning).toContainText(/チャット1|synthetic edit one/);
+  await expect(warning).toContainText(/チャット2|synthetic edit two/);
   await expect(warning).toContainText('未確定');
   await expect(warning).not.toContainText(first);
   await expect(warning).not.toContainText(second);
@@ -1719,24 +1732,38 @@ test('workspace conflict warning uses anonymous chat names and clears automatica
   await expect(warning).toBeHidden({timeout:15000});
 });
 
-test('project and chat chrome hides workspace names and prompt previews (@mock)',async({page})=>{
+test('project folder names display while parent paths stay private (@mock)',async({page})=>{
   box=await seededProjects();const {url}=await box.start({CODEX_WORKSPACE:''});
   await page.goto(url);
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
-  await expect(page.locator('#workspace')).toHaveText(/^プロジェクト\d+$/);
-  await expect(page.locator('#active-thread')).toHaveText(/^チャット\d+$/);
+  await expect(page.locator('#workspace')).toHaveText('beta');
+  await expect(page.locator('#active-thread')).toHaveText('Beta project');
+  await expect(page.locator('.thread-item')).toHaveCount(1);
+  await expect(page.locator('.thread-item')).toHaveAttribute('title','Beta project');
   for(const selector of ['#workspace','#project-select','#project-hint','#thread-list','#active-thread']){
-    const text=await page.locator(selector).textContent();
-    expect(text).not.toContain('alpha');
-    expect(text).not.toContain('beta');
-    expect(text).not.toContain('ANSWER_');
-    expect(text).not.toContain(box.alpha);
-    expect(text).not.toContain(box.beta);
+    const value=await page.locator(selector).textContent();
+    expect(value).not.toContain('ANSWER_');
+    expect(value).not.toContain(box.alpha);
+    expect(value).not.toContain(box.beta);
   }
   const options=await page.locator('#project-select option').evaluateAll(nodes=>nodes.map(node=>node.title));
-  expect(options.every(title=>/^プロジェクト\d+$/.test(title))).toBe(true);
+  expect(options).toEqual(expect.arrayContaining(['alpha','beta']));
+  await page.locator('#project-select').selectOption(box.alpha);
+  await expect(page.locator('#workspace')).toHaveText('alpha');
+  await page.locator('#ui-language').selectOption('en');
+  await expect(page.locator('#workspace')).toHaveText('alpha');
+  await expect(page.locator('#project-select')).toContainText('alpha · 1 chats');
+  await expect(page.locator('#project-select')).toContainText('beta · 1 chats');
+  await page.reload();
+  await expect(page.locator('#workspace')).toHaveText('alpha');
+  await expect(page.locator('#active-thread')).toHaveText('Alpha project');
   const chatTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
-  expect(chatTitles.every(title=>/^チャット\d+$/.test(title))).toBe(true);
+  // Project-scoped view must not show the other project's chat.
+  expect(chatTitles).toEqual(['Alpha project']);
+  await page.locator('#show-all').check();
+  await expect(page.locator('.thread-item')).toHaveCount(2);
+  const allTitles=await page.locator('.thread-item').evaluateAll(nodes=>nodes.map(node=>node.title));
+  expect(allTitles).toEqual(expect.arrayContaining(['Alpha project','Beta project']));
 });
 
 test('three chats across two workspaces keep activity, approvals and stops correctly scoped (@mock)',async({page})=>{
@@ -1800,7 +1827,10 @@ test('three chats across two workspaces keep activity, approvals and stops corre
   expect(wrong.status()).toBe(409);
   expect((await (await page.request.get(`${url}/api/approvals`,{headers:scope(box.alpha)})).json()).approvals).toHaveLength(1);
   await expect.poll(async()=>!(await state()).runningThreadIds.includes(a2)).toBe(true);
-  await expect(page.locator('#activity-feed-list .activity-completed')).toContainText(a2Label);
+  // The thread preview becomes the user-visible title after its first turn.
+  // Do not compare against the stale anonymous label captured at creation.
+  await expect(page.locator('#activity-feed-list .activity-completed'))
+    .toContainText('A2-progress synthetic work');
   await expect.poll(async()=>[(await state()).runningThreadIds.includes(a1),
     (await state()).runningThreadIds.includes(b1)]).toEqual([true,true]);
   const stopped=await page.request.post(`${url}/api/threads/${b1}/interrupt`,{
@@ -1878,7 +1908,54 @@ test('three chats across two workspaces keep activity, approvals and stops corre
   expect([editOne.status(),editTwo.status()]).toEqual([202,202]);
   const conflict=page.locator('#workspace-conflicts');
   await expect(conflict).toBeVisible();
-  await expect(conflict).toContainText(a2Label);
+  await expect(conflict).toContainText('A2-progress synthetic work');
   await expect(conflict).not.toContainText(box.alpha);
   await expect(conflict).toBeHidden({timeout:15000});
+});
+
+test('official Codex conversation title outranks preview in primary and split history (@mock)',async({page})=>{
+  box=await seededProjects();
+  const snapshot=JSON.parse(await readFile(box.store,'utf8'));
+  const beta=snapshot.threads.find(t=>t.id==='mock-beta-auto');
+  beta.name='正式なチャット名';
+  await writeFile(box.store,JSON.stringify(snapshot));
+  const {url}=await box.start({CODEX_WORKSPACE:''});
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
+  await expect(page.locator('.thread-item[data-thread-id="mock-beta-auto"] .thread-name')).toHaveText('正式なチャット名');
+  await page.locator('#split-toggle').click();
+  await expect(page.locator('#secondary-thread option[value="mock-beta-auto"]')).toHaveText('正式なチャット名');
+  await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
+  await page.locator('#ui-language').selectOption('en');
+  await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
+  await expect(page.locator('.thread-item[data-thread-id="mock-beta-auto"]')).toHaveAttribute('title','正式なチャット名');
+  await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
+  expect(await page.evaluate(()=>Object.keys(localStorage).some(key=>
+    (localStorage.getItem(key)||'').includes('正式なチャット名')))).toBe(false);
+  await page.reload();
+  await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
+});
+
+
+test('legacy Codex thread without summary shows first stored user request (@mock)',async({page})=>{
+  box=await seededProjects();
+  const snapshot=JSON.parse(await readFile(box.store,'utf8'));
+  const beta=snapshot.threads.find(row=>row.id==='mock-beta-auto');
+  beta.name=null;
+  beta.preview='';
+  await writeFile(box.store,JSON.stringify(snapshot));
+  const {url}=await box.start({CODEX_WORKSPACE:''});
+  // Start loads the stored mock history with no list/read metadata title.
+  // No turn/start, model inference or real user profile is used.
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#active-thread')).toHaveText('Open Beta project');
+  await expect(page.locator('.thread-item[data-thread-id="mock-beta-auto"] .thread-name'))
+    .toHaveText('Open Beta project');
+  await page.locator('#split-toggle').click();
+  await expect(page.locator('#secondary-thread option[value="mock-beta-auto"]'))
+    .toHaveText('Open Beta project');
+  await page.reload();
+  await expect(page.locator('#active-thread')).toHaveText('Open Beta project');
 });

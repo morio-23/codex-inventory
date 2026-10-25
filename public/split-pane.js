@@ -168,7 +168,7 @@ export class SplitPane {
       this.threadSelect.replaceChildren();
       const empty=document.createElement('option');empty.value='';empty.textContent=this.getLanguage()==='en'?'Select another chat':'別のチャットを選択';this.threadSelect.append(empty);
       this.threads.forEach((thread,i)=>{
-        const opt=document.createElement('option');opt.value=thread.id;opt.textContent=this.shortLabel(thread,i);
+        const opt=document.createElement('option');opt.value=thread.id;opt.dataset.i18nIgnore='';opt.textContent=this.shortLabel(thread,i);
         this.threadSelect.append(opt);
       });
       const found=this.threads.find(x=>x.id===prior);
@@ -322,7 +322,7 @@ export class SplitPane {
       if(response.thread&&!this.threads.some(x=>x.id===response.thread.id)){
         this.threads.unshift(response.thread);
         const option=document.createElement('option');option.value=response.thread.id;
-        option.textContent=this.shortLabel(response.thread,0);
+        option.dataset.i18nIgnore='';option.textContent=this.shortLabel(response.thread,0);
         this.threadSelect.append(option);
       }
       await this.selectThread(response.thread.id);

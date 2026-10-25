@@ -13,7 +13,7 @@
   <main class="shell">
     <header class="topbar">
       <div class="brand-mark" aria-hidden="true"><span>◆</span></div>
-      <div class="brand"><span class="eyebrow">LOCAL CODEX CONTROLLER / V0.6</span><h1>CODEX <em>INVENTORY</em></h1></div>
+      <div class="brand"><span class="eyebrow">LOCAL CODEX CONTROLLER / V0.7.0-BETA.1</span><h1>CODEX <em>INVENTORY</em></h1></div>
       <div class="topbar-actions"><button id="split-toggle" type="button" class="split-toggle" aria-pressed="false" aria-controls="secondary-pane">◫ 2画面</button><label class="language-picker" for="ui-language"><span>Language / 言語</span><select id="ui-language" aria-label="Interface language / 表示言語"><option value="ja">日本語</option><option value="en">English</option></select></label><div class="server-pill" id="server-pill"><span class="lamp"></span><span id="connection">接続確認中...</span></div></div>
     </header>
     <div id="notice" class="notice" role="status" aria-live="polite">Codexデスクトップアプリのチャット履歴を読み込みます。</div>
@@ -53,7 +53,7 @@
         <div class="inventory-frame">
           <div class="character-row">
             <div class="avatar-frame"><svg viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8b563b" d="M8 2h16v4h4v10h-4v10H8V16H4V6h4z"/><path fill="#e5b48a" d="M8 8h16v15H8z"/><path fill="#f6d19f" d="M10 10h12v12H10z"/><path fill="#283e44" d="M10 13h4v4h-4zM18 13h4v4h-4z"/><path fill="#bb6b52" d="M14 19h4v2h-4z"/><path fill="#416e6c" d="M8 24h16v8H8z"/></svg></div>
-            <div class="player-info"><span class="eyebrow small">冒険者ステータス</span><h2>あなたの開発ワールド</h2><span class="workspace-name" id="workspace">読込中...</span></div>
+            <div class="player-info"><span class="eyebrow small">冒険者ステータス</span><h2>あなたの開発ワールド</h2><span class="workspace-name" id="workspace" data-i18n-ignore>読込中...</span></div>
             <div class="world-icon" title="ローカルワールド">✦<span>LOCAL</span></div>
           </div>
           <div class="inventory-head"><span>道具を選ぶ <span class="inventory-hint">（ホバーで詳細）</span></span><span>3 × 3</span></div>
@@ -90,7 +90,7 @@
       <section class="quest-column primary-quest" id="primary-pane" role="tabpanel" aria-labelledby="split-primary-tab">
         <div class="quest-header"><div><span class="eyebrow small">YOUR QUEST</span><h2><span class="quest-rune">✣</span> クエストログ</h2></div><span id="mode-badge" class="mode-badge">観察モード</span></div>
         <div class="quest-paper">
-          <div id="active-thread" class="active-thread">新規チャット</div><div class="quest-intro"><span>✧</span><p id="quest-lead">アイテムを選び、任務の内容を入力してください。Codexがあなたの開発ワールドを探索します。</p></div>
+          <div id="active-thread" class="active-thread" data-i18n-ignore>新規チャット</div><div class="quest-intro"><span>✧</span><p id="quest-lead">アイテムを選び、任務の内容を入力してください。Codexがあなたの開発ワールドを探索します。</p></div>
           <div class="model-controls" aria-label="Codexモデルと推論レベル">
             <label for="model-select">モデル
               <select id="model-select" disabled><option value="">Codex設定を継承</option></select>

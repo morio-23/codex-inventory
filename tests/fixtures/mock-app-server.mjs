@@ -26,7 +26,7 @@ let active=new Map([...threads.values()].flatMap(thread=>{
   return turn?.status==='inProgress'?[[thread.id,{turn}]]:[];
 }));
 const pendingApprovals=new Map();
-function compact(t){return {id:t.id,preview:t.preview||'',cwd:t.cwd,createdAt:t.createdAt,updatedAt:t.updatedAt,turns:t.turns,status:{type:active.has(t.id)?'active':'idle'}};}
+function compact(t){return {id:t.id,name:t.name??null,preview:t.preview||'',cwd:t.cwd,createdAt:t.createdAt,updatedAt:t.updatedAt,turns:t.turns,status:{type:active.has(t.id)?'active':'idle'}};}
 async function handle(packet){
   const {id,method,params={}}=packet;
   if(method===undefined && id!==undefined && pendingApprovals.has(id)){
