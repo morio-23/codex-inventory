@@ -311,7 +311,10 @@ export class CodexService extends EventEmitter {
       if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409});
       const text=action==='quest'?prompt.trim():`${taskInstructions[action]}\n\n【ユーザー依頼】\n${prompt.trim()}`;
       const input=[{type:'text',text,text_elements:[]}];
-      const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',approvalsReviewer:'user',sandboxPolicy:editing?{type:'workspaceWrite',writableRoots:[cwd],networkAccess:false}:{type:'readOnly'}},{timeoutMs:60000});
+      const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',approvalsReviewer:'user',sandboxPolicy:editing?
+        {type:'workspaceWrite',writableRoots:[cwd],networkAccess:false,
+          excludeTmpdirEnvVar:true,excludeSlashTmp:true}:
+        {type:'readOnly',networkAccess:false}},{timeoutMs:60000});
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       const turnId=result?.turn?.id;
       const early=this.earlyCompletions.get(threadId)?.get(turnId);
