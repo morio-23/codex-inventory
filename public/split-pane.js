@@ -1,4 +1,5 @@
 // Independent secondary view for concurrent Codex work. No sensitive data is persisted in Git.
+import {turnFailureNotice} from './turn-error-ui.js';
 export class SplitPane {
   constructor({api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,getRunning,getTurnId,setTurnId,
     getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus,
@@ -350,7 +351,7 @@ export class SplitPane {
       running.delete(id);
       this.setMessages(id,(this.getMessages(id)||[]).filter(m=>m!==optimistic));
       this.renderLog();
-      this.notify('分割チャットを開始できませんでした',true);
+      this.notify(turnFailureNotice(error,this.getLanguage()).text,true);
     }finally{this.updateButtons();this.onSharedStatus();}
   }
   async stop(){
