@@ -247,6 +247,21 @@ export class CodexService extends EventEmitter {
     }
     return {thread:simplifyThread(response.thread),messages:projectHistory(response.thread),rawStatus:response.thread.status};
   }
+  /** Minimal read before a turn. Never hydrate history just to validate
+   *  workspace ownership or whether another client owns the active turn.
+   *  Paginated or unmaterialized threads can reject includeTurns:true with
+   *  JSON-RPC -32601 (unsupported list_turns), even on the first user turn.
+   *  A failed metadata read always fails closed; no guessing from cached IDs.
+   */
+  async readThreadForTurn(id) {
+    const response=await this.client.request('thread/read',
+      {threadId:id,includeTurns:false},{timeoutMs:60000});
+    const raw=response?.thread;
+    if(!raw||raw.id!==id||typeof raw.cwd!=='string'||!raw.cwd||
+       typeof raw.status?.type!=='string')
+      throw Object.assign(new Error('チャットの安全確認に必要なメタデータを取得できません'),{status:409});
+    return {thread:simplifyThread(raw),rawStatus:raw.status};
+  }
   async listModels(){
     const all=[];let cursor=null;
     for(let i=0;i<10;i++){
@@ -308,7 +323,7 @@ export class CodexService extends EventEmitter {
     if(editing)this.editingThreads.add(threadId);
     this.#emitActivityState();
     try {
-      const record=await this.#turnPhase('THREAD_READ',()=>this.readThread(threadId));
+      const record=await this.#turnPhase('THREAD_READ',()=>this.readThreadForTurn(threadId));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       if(!sameWorkspace(record.thread?.cwd,cwd)) throw Object.assign(new Error('別プロジェクトのチャットです。画面で所属プロジェクトを選択してください。'),{status:409});
       if(record.rawStatus?.type==='active')throw Object.assign(new Error('このスレッドは別のクライアントで実行中です'),{status:409});
