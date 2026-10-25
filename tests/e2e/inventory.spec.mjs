@@ -1601,8 +1601,25 @@ test('SSE reconnect reloads a secondary chat that completed while events were un
 test('a stale secondary history response cannot erase a newer SSE reply (@mock)',async({page})=>{
   box=await seededProjects();
   const {url}=await box.start({CODEX_WORKSPACE:''});
+  // The E2E harness considers the HTTP listener ready as soon as GET /
+  // succeeds, but Codex mock initialize and project discovery continue
+  // asynchronously. Check the backend readiness *independently* before
+  // starting this renderer/SSE race test; fail with a specific stage rather
+  // than attributing backend startup latency to SSE history reconciliation.
+  await expect.poll(async()=>{
+    try{
+      const response=await page.request.get(url+'/api/status',{timeout:4000});
+      if(!response.ok())return 'HTTP_'+response.status();
+      const status=await response.json();
+      return status.connected===true?'READY':'MOCK_APP_SERVER_NOT_READY';
+    }catch{return 'MOCK_STATUS_UNREACHABLE';}
+  },{message:'mock backend initialization before secondary SSE race',timeout:20000,
+    intervals:[200,500,1000]}).toBe('READY');
+  const rendererErrors=[];
+  page.on('pageerror',error=>rendererErrors.push(error.message));
   await page.goto(url);
-  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY',{timeout:15000});
+  expect(rendererErrors).toEqual([]);
   await page.locator('#split-toggle').click();
   await page.locator('#secondary-thread').selectOption('mock-alpha-auto');
   await expect(page.locator('#secondary-log')).toContainText('ANSWER_ALPHA');
