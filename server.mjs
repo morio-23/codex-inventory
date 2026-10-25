@@ -24,6 +24,7 @@ const assets=new Map([
   ['/split-pane.js',['public/split-pane.js','text/javascript; charset=utf-8']],
   ['/activity-feed-state.js',['public/activity-feed-state.js','text/javascript; charset=utf-8']],
   ['/display-labels.js',['public/display-labels.js','text/javascript; charset=utf-8']],
+  ['/turn-error-ui.js',['public/turn-error-ui.js','text/javascript; charset=utf-8']],
   ['/conflict-warning-state.js',['public/conflict-warning-state.js','text/javascript; charset=utf-8']],
   ['/markdown.js',['public/markdown.js','text/javascript; charset=utf-8']],
   ['/inventory-state.js',['public/inventory-state.js','text/javascript; charset=utf-8']],
@@ -49,6 +50,11 @@ async function readJson(req) {
   for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>50_000)throw Object.assign(new Error('入力が大きすぎます'),{status:413});}
   try {return JSON.parse(raw);}catch{throw Object.assign(new Error('JSONが不正です'),{status:400});}
 }
+// Only enumerated diagnostics are passed to the UI, never raw RPC payloads.
+const publicTurnStages=new Set([
+  'APP_SERVER_INIT','WORKSPACE_SCOPE','WORKSPACE_CHECK',
+  'THREAD_READ','MODEL_SELECTION','THREAD_RESUME','TURN_START_RPC'
+]);
 const validThreadId=id=>/^[A-Za-z0-9_-]{1,128}$/.test(id);
 const validModelChoice=value=>['model','effort'].every(key=>
   !Object.hasOwn(value,key)||value[key]===null||
@@ -152,7 +158,10 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
             typeof input.editing!=='boolean'||typeof input.prompt!=='string'||
             typeof input.action!=='string'||!validModelChoice(input))
             return json(res,400,{error:'モデル・推論レベルまたは入力形式が不正です'});
-          const selected=await scopedWorkspace(req);
+          const selected=await scopedWorkspace(req).catch(error=>{
+            if(error&&typeof error==='object')error.turnStage='WORKSPACE_SCOPE';
+            throw error;
+          });
           return json(res,202,await service.startTurn({threadId:id,...input,...(explicitScope(req)?{workspace:selected}:{})}));
         }
         if(req.method==='POST'&&m[2]==='interrupt'){
@@ -249,7 +258,11 @@ export function createHandler({service,port:localPort=port,workspace:cwd=workspa
       }
       return json(res,404,{error:'見つかりません'});
     }catch(e){
-      if(!res.headersSent)return json(res,e.status||(/already|実行中|再開/.test(e.message)?409:503),{error:e.message});
+      if(!res.headersSent)return json(res,e.status||(/already|実行中|再開/.test(e.message)?409:503),{
+        error:e.message,
+        ...(publicTurnStages.has(e.turnStage)?{turnStage:e.turnStage}:{}),
+        ...(Number.isSafeInteger(e.code)&&e.code<0&&e.code>=-32768?{rpcCode:e.code}:{})
+      });
       res.end();
     }
   };

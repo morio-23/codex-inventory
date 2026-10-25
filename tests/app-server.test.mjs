@@ -53,7 +53,21 @@ test('v2 requests declare explicit review routing and complete text input shape'
   assert.deepEqual(observed.get('turn/start')?.input,[
     {type:'text',text:'Synthetic contract input',text_elements:[]}
   ]);
+  // Official 0.144.5/0.164.0 v2 SandboxPolicy unions require networkAccess
+  // for readOnly, and both excludeTmpdirEnvVar/excludeSlashTmp for
+  // workspaceWrite. The old incomplete objects passed mocks but fail strict
+  // real app-server deserialization before a Codex turn can begin.
+  assert.deepEqual(observed.get('turn/start')?.sandboxPolicy,{
+    type:'readOnly',networkAccess:false
+  });
   await complete(service,thread.id);
+  const {thread:editable}=await service.createThread({editing:true});
+  await service.startTurn({threadId:editable.id,prompt:'Synthetic edit contract',editing:true});
+  assert.deepEqual(observed.get('turn/start')?.sandboxPolicy,{
+    type:'workspaceWrite',writableRoots:[process.cwd()],networkAccess:false,
+    excludeTmpdirEnvVar:true,excludeSlashTmp:true
+  });
+  await complete(service,editable.id);
 });
 
 test('current command approval mock carries protocol correlation metadata',async t=>{
@@ -139,7 +153,7 @@ test('an externally active thread is not steered by a new Inventory turn',async 
   };
   const external=await client.request('turn/start',{threadId:thread.id,cwd:process.cwd(),
     input:[{type:'text',text:'Synthetic external turn',text_elements:[]}],
-    approvalPolicy:'on-request',sandboxPolicy:{type:'readOnly'}});
+    approvalPolicy:'on-request',sandboxPolicy:{type:'readOnly',networkAccess:false}});
   await assert.rejects(()=>service.startTurn({threadId:thread.id,prompt:'Do not steer'}),{status:409});
   assert.equal(turnStarts,1);
   await client.request('turn/interrupt',{threadId:thread.id,turnId:external.turn.id});
@@ -353,4 +367,92 @@ test('network permission denial sends an empty permission profile',async t=>{
   const approval=await requested;
   service.respondApproval({approvalId:approval.approvalId,decision:'decline',workspace:process.cwd()});
   assert.equal((await finished).status,'failed');
+});
+
+test('a mock RPC turn rejection is tagged with a precise safe stage',async t=>{
+  const {client,service}=await harness({MOCK_FAIL_METHODS:'turn/start'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread();
+  await assert.rejects(
+    ()=>service.startTurn({threadId:thread.id,prompt:'synthetic read-only request',editing:false}),
+    error=>{
+      assert.equal(error.turnStage,'TURN_START_RPC');
+      assert.equal(service.running.size,0);
+      return true;
+    });
+});
+
+test('failure before turn/start is tagged THREAD_RESUME without starting a turn',async t=>{
+  const {client,service}=await harness();
+  t.after(()=>client.close());
+  const {thread}=await service.createThread();
+  service.subscribed.delete(thread.id);
+  const original=client.request.bind(client);
+  let turnStarts=0;
+  client.request=(method,params,options)=>{
+    if(method==='thread/resume')throw new Error('synthetic private resume failure');
+    if(method==='turn/start')turnStarts++;
+    return original(method,params,options);
+  };
+  await assert.rejects(
+    ()=>service.startTurn({threadId:thread.id,prompt:'synthetic no-op request',editing:false}),
+    error=>error.turnStage==='THREAD_RESUME');
+  assert.equal(turnStarts,0);
+});
+
+test('new turn uses metadata-only read when full history raises -32601',async t=>{
+  const {client,service}=await harness({MOCK_PAGINATED_EMPTY_READ:'1'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:false});
+  const reads=[];
+  const request=client.request.bind(client);
+  client.request=(method,params,options)=>{
+    if(method==='thread/read')reads.push(params.includeTurns);
+    return request(method,params,options);
+  };
+  // Reproduce real paginated-store behavior before any turn exists.
+  // UI may show empty history for a newly created thread only when a second
+  // metadata-only read confirms its idle state and lack of a preview.
+  const empty=await service.readThread(thread.id);
+  assert.deepEqual(empty.messages,[]);
+  assert.equal(empty.thread.id,thread.id);
+  const created=await service.startTurn({
+    threadId:thread.id,prompt:'Synthetic first read-only turn',editing:false});
+  assert.ok(created.turnId);
+  assert.deepEqual(reads,[true,false,false]);
+  await complete(service,thread.id);
+  const history=await service.readThread(thread.id);
+  assert.equal(history.messages[0].role,'user');
+});
+
+test('failed metadata-only guard never calls turn/start or trusts cached thread ID',async t=>{
+  const {client,service}=await harness();
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:false});
+  const request=client.request.bind(client);
+  let turnStarts=0;
+  client.request=(method,params,options)=>{
+    if(method==='thread/read'&&params.includeTurns===false){
+      const error=new Error('unsupported metadata-only thread read');
+      error.code=-32601;
+      throw error;
+    }
+    if(method==='turn/start')turnStarts++;
+    return request(method,params,options);
+  };
+  await assert.rejects(
+    ()=>service.startTurn({threadId:thread.id,prompt:'Must not execute',editing:false}),
+    error=>error.code===-32601&&error.turnStage==='THREAD_READ');
+  assert.equal(turnStarts,0);
+  assert.equal(service.running.size,0);
+});
+
+test('existing paginated history -32601 never becomes a fabricated empty transcript',async t=>{
+  const {client,service}=await harness({MOCK_PAGINATED_EMPTY_READ:'1'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:false});
+  // Simulate an existing/restored thread: provenance of fresh creation is gone.
+  service.freshEmptyThreads.delete(thread.id);
+  await assert.rejects(()=>service.readThread(thread.id),
+    error=>error.code===-32601 && /list_turns is not supported yet/.test(error.message));
 });

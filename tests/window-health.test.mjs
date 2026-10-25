@@ -11,7 +11,7 @@ const {RENDER_PROBE,classifyDocumentHealth,countVisualColorBuckets}=
 const root=dirname(dirname(fileURLToPath(import.meta.url)));
 
 test('source UI assets match explicit packaged inventory',()=>{
-  assert.equal(requiredUiResources.length,12);
+  assert.equal(requiredUiResources.length,13);
   assert.equal(inspectUiResources(root),'PACKAGED_UI_ASSETS_OK');
   assert.equal(inspectUiResources(join(root,'__nonexistent-ui__')),'PACKAGED_UI_ASSET_MISSING');
 });

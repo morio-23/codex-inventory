@@ -72,10 +72,10 @@ export class CodexService extends EventEmitter {
     this.connectionEpoch=0;this.needsRecovery=true;this.recoveryPromise=null;
     this.knownProjects=new Set(Array.isArray(knownProjects)?knownProjects.filter(x=>typeof x==='string'&&x.length<=4096):[]);
     this.approvals=new Map();this.approvalSequence=0;this.turnWorkspaces=new Map();
-    this.running=new Map();this.editingThreads=new Set();this.finishedTurns=new Set();this.recentCompletions=[];this.earlyCompletions=new Map();this.earlyApprovals=new Map();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();
+    this.running=new Map();this.editingThreads=new Set();this.finishedTurns=new Set();this.recentCompletions=[];this.earlyCompletions=new Map();this.earlyApprovals=new Map();this.subscribed=new Set();this.tokenUsage=new Map();this.knownThreads=new Map();this.freshEmptyThreads=new Set();
     client.on('notification',e=>this.#notification(e));
     client.on('server-request',e=>this.#onApproval(e));
-    client.on('disconnect',error=>{this.connectionEpoch++;this.needsRecovery=true;this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.editingThreads.clear();this.finishedTurns.clear();this.recentCompletions=[];this.earlyCompletions.clear();this.earlyApprovals.clear();this.subscribed.clear();this.emit('event',{type:'connection',error:error.message});});
+    client.on('disconnect',error=>{this.connectionEpoch++;this.needsRecovery=true;this.#clearApprovals();this.turnWorkspaces.clear();this.running.clear();this.editingThreads.clear();this.finishedTurns.clear();this.recentCompletions=[];this.earlyCompletions.clear();this.earlyApprovals.clear();this.subscribed.clear();this.freshEmptyThreads.clear();this.emit('event',{type:'connection',error:error.message});});
     client.on('warning',message=>this.emit('event',{type:'warning',text:message}));
   }
   async start(){
@@ -240,12 +240,38 @@ export class CodexService extends EventEmitter {
     let response;
     try {response=await this.client.request('thread/read',{threadId:id,includeTurns:true},{timeoutMs:60000});}
     catch(error){
+      // Some paginated stores reject full history for a brand-new thread with
+      // -32601: "list_turns is not supported yet". Treat it as empty ONLY if
+      // this App Server process just created the ID, no turn has begun, and
+      // an independent metadata-only read still confirms idle/no preview.
+      // Never invent empty history for an arbitrary persisted/Desktop thread.
+      if(error.code===-32601&&/list_turns is not supported yet/i.test(error.message)&&
+         this.freshEmptyThreads.has(id)){
+        const meta=await this.readThreadForTurn(id);
+        if(meta.rawStatus?.type==='idle'&&!meta.thread.preview)
+          return {...meta,messages:[]};
+      }
       if(!/not materialized yet.*includeTurns|rollout .* is empty/.test(error.message))throw error;
       const thread=this.knownThreads.get(id)||(await this.listThreads({all:true})).threads.find(item=>item.id===id);
       if(!thread)throw error;
       return {thread,messages:[],rawStatus:thread.status};
     }
     return {thread:simplifyThread(response.thread),messages:projectHistory(response.thread),rawStatus:response.thread.status};
+  }
+  /** Minimal read before a turn. Never hydrate history just to validate
+   *  workspace ownership or whether another client owns the active turn.
+   *  Paginated or unmaterialized threads can reject includeTurns:true with
+   *  JSON-RPC -32601 (unsupported list_turns), even on the first user turn.
+   *  A failed metadata read always fails closed; no guessing from cached IDs.
+   */
+  async readThreadForTurn(id) {
+    const response=await this.client.request('thread/read',
+      {threadId:id,includeTurns:false},{timeoutMs:60000});
+    const raw=response?.thread;
+    if(!raw||raw.id!==id||typeof raw.cwd!=='string'||!raw.cwd||
+       typeof raw.status?.type!=='string')
+      throw Object.assign(new Error('チャットの安全確認に必要なメタデータを取得できません'),{status:409});
+    return {thread:simplifyThread(raw),rawStatus:raw.status};
   }
   async listModels(){
     const all=[];let cursor=null;
@@ -277,7 +303,7 @@ export class CodexService extends EventEmitter {
     if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。再度新規作成してください'),{status:409});
     if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
     const result=await this.client.request('thread/start',{cwd,approvalPolicy:'on-request',approvalsReviewer:'user',sandbox:editing?'workspace-write':'read-only',ephemeral:false,...(preferred?{model:preferred}:{})});
-    const thread={...simplifyThread(result.thread),cwd:result.thread?.cwd||cwd};this.subscribed.add(thread.id);this.knownThreads.set(thread.id,thread);
+    const thread={...simplifyThread(result.thread),cwd:result.thread?.cwd||cwd};this.subscribed.add(thread.id);this.knownThreads.set(thread.id,thread);this.freshEmptyThreads.add(thread.id);
     this.emit('event',{type:'thread',threadId:thread.id,thread});
     return {thread};
   }
@@ -287,11 +313,20 @@ export class CodexService extends EventEmitter {
     await this.client.request('thread/resume',{threadId},{timeoutMs:60000});
     this.subscribed.add(threadId);
   }
+  // Only an enumerated stage identifier may be surfaced to the renderer.
+  // Do not store or display the raw Codex RPC error, paths or prompt.
+  async #turnPhase(stage,operation){
+    try{return await operation();}
+    catch(error){
+      if(error&&typeof error==='object')error.turnStage=stage;
+      throw error;
+    }
+  }
   async startTurn({threadId,prompt,action='quest',editing=false,model=null,effort=null,workspace=null}) {
-    await this.start();
+    await this.#turnPhase('APP_SERVER_INIT',()=>this.start());
     const epoch=this.connectionEpoch;
-    const cwd=workspace?await this.validateWorkspace(workspace):this.workspace;
-    if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409});
+    const cwd=workspace?await this.#turnPhase('WORKSPACE_CHECK',()=>this.validateWorkspace(workspace)):this.workspace;
+    if(!cwd)throw Object.assign(new Error('先にプロジェクトを選択してください'),{status:409,turnStage:'WORKSPACE_CHECK'});
     if(!threadId||typeof prompt!=='string'||!prompt.trim()||prompt.length>10000||!Object.hasOwn(taskInstructions,action)) throw new Error('任務の内容が不正です');
     if((action==='fix'||action==='build')&&!editing)throw new Error('実装・修正には編集許可が必要です');
     if(this.running.has(threadId))throw new Error('このスレッドは実行中です');
@@ -299,21 +334,25 @@ export class CodexService extends EventEmitter {
     if(editing)this.editingThreads.add(threadId);
     this.#emitActivityState();
     try {
-      const record=await this.readThread(threadId);
+      const record=await this.#turnPhase('THREAD_READ',()=>this.readThreadForTurn(threadId));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       if(!sameWorkspace(record.thread?.cwd,cwd)) throw Object.assign(new Error('別プロジェクトのチャットです。画面で所属プロジェクトを選択してください。'),{status:409});
       if(record.rawStatus?.type==='active')throw Object.assign(new Error('このスレッドは別のクライアントで実行中です'),{status:409});
-      const selection=await this.selectedModel({model,effort});
+      const selection=await this.#turnPhase('MODEL_SELECTION',()=>this.selectedModel({model,effort}));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
-      await this.ensureSubscribed(threadId);
+      await this.#turnPhase('THREAD_RESUME',()=>this.ensureSubscribed(threadId));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
-      await this.validateWorkspace(cwd);
-      if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409});
+      await this.#turnPhase('WORKSPACE_CHECK',()=>this.validateWorkspace(cwd));
+      if(!workspace&&!sameWorkspace(this.workspace,cwd))throw Object.assign(new Error('プロジェクトが切り替わりました。送信をやり直してください'),{status:409,turnStage:'WORKSPACE_CHECK'});
       const text=action==='quest'?prompt.trim():`${taskInstructions[action]}\n\n【ユーザー依頼】\n${prompt.trim()}`;
       const input=[{type:'text',text,text_elements:[]}];
-      const result=await this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',approvalsReviewer:'user',sandboxPolicy:editing?{type:'workspaceWrite',writableRoots:[cwd],networkAccess:false}:{type:'readOnly'}},{timeoutMs:60000});
+      const result=await this.#turnPhase('TURN_START_RPC',()=>this.client.request('turn/start',{threadId,input,cwd,...selection,approvalPolicy:'on-request',approvalsReviewer:'user',sandboxPolicy:editing?
+        {type:'workspaceWrite',writableRoots:[cwd],networkAccess:false,
+          excludeTmpdirEnvVar:true,excludeSlashTmp:true}:
+        {type:'readOnly',networkAccess:false}},{timeoutMs:60000}));
       if(epoch!==this.connectionEpoch)throw Object.assign(new Error('接続が切り替わりました'),{status:409});
       const turnId=result?.turn?.id;
+      this.freshEmptyThreads.delete(threadId);
       const early=this.earlyCompletions.get(threadId)?.get(turnId);
       this.earlyCompletions.delete(threadId);
       const completedEarly=early||null;
