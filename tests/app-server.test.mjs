@@ -153,7 +153,7 @@ test('an externally active thread is not steered by a new Inventory turn',async 
   };
   const external=await client.request('turn/start',{threadId:thread.id,cwd:process.cwd(),
     input:[{type:'text',text:'Synthetic external turn',text_elements:[]}],
-    approvalPolicy:'on-request',sandboxPolicy:{type:'readOnly'}});
+    approvalPolicy:'on-request',sandboxPolicy:{type:'readOnly',networkAccess:false}});
   await assert.rejects(()=>service.startTurn({threadId:thread.id,prompt:'Do not steer'}),{status:409});
   assert.equal(turnStarts,1);
   await client.request('turn/interrupt',{threadId:thread.id,turnId:external.turn.id});
