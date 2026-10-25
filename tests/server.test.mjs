@@ -37,3 +37,35 @@ test('HTTP API returns native threads and quota, enforces input safety',async t=
   const valid=await req('/api/threads/'+thread.id+'/turn',{prompt:'hello',action:'quest',editing:false});assert.equal(valid.status,202);
   const read=await (await fetch(root+'/api/threads/'+thread.id)).json();assert.equal(read.thread.id,thread.id);
 });
+
+test('HTTP turn rejection returns only bounded stage and numeric RPC metadata',async t=>{
+  const client=new AppServerClient({command:process.execPath,args:[mock],timeoutMs:5000});
+  const service=new CodexService(client,{workspace:process.cwd()});
+  const server=http.createServer();
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const port=server.address().port;
+  server.on('request',createHandler({service,port}));
+  t.after(()=>{server.closeAllConnections();server.close();client.close();});
+  const root='http://127.0.0.1:'+port;
+  await service.start();
+  const {thread}=await service.createThread();
+  const original=client.request.bind(client);
+  client.request=(method,params,options)=>{
+    if(method==='turn/start'){
+      const error=new Error('synthetic protocol refusal with private path');
+      error.code=-32602;
+      throw error;
+    }
+    return original(method,params,options);
+  };
+  const response=await fetch(root+'/api/threads/'+thread.id+'/turn',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt:'synthetic content',action:'quest',editing:false})
+  });
+  assert.equal(response.status,503);
+  const data=await response.json();
+  assert.equal(data.turnStage,'TURN_START_RPC');
+  assert.equal(data.rpcCode,-32602);
+  assert.equal(service.running.size,0);
+});
