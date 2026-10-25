@@ -399,3 +399,47 @@ test('failure before turn/start is tagged THREAD_RESUME without starting a turn'
     error=>error.turnStage==='THREAD_RESUME');
   assert.equal(turnStarts,0);
 });
+
+test('new turn uses metadata-only read when full history raises -32601',async t=>{
+  const {client,service}=await harness({MOCK_PAGINATED_EMPTY_READ:'1'});
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:false});
+  const reads=[];
+  const request=client.request.bind(client);
+  client.request=(method,params,options)=>{
+    if(method==='thread/read')reads.push(params.includeTurns);
+    return request(method,params,options);
+  };
+  // Reproduce real paginated-store behavior before any turn exists.
+  await assert.rejects(()=>service.readThread(thread.id),
+    error=>error.code===-32601 && /list_turns is not supported yet/.test(error.message));
+  const created=await service.startTurn({
+    threadId:thread.id,prompt:'Synthetic first read-only turn',editing:false});
+  assert.ok(created.turnId);
+  assert.deepEqual(reads,[true,false]);
+  await complete(service,thread.id);
+  const history=await service.readThread(thread.id);
+  assert.equal(history.messages[0].role,'user');
+});
+
+test('failed metadata-only guard never calls turn/start or trusts cached thread ID',async t=>{
+  const {client,service}=await harness();
+  t.after(()=>client.close());
+  const {thread}=await service.createThread({editing:false});
+  const request=client.request.bind(client);
+  let turnStarts=0;
+  client.request=(method,params,options)=>{
+    if(method==='thread/read'&&params.includeTurns===false){
+      const error=new Error('unsupported metadata-only thread read');
+      error.code=-32601;
+      throw error;
+    }
+    if(method==='turn/start')turnStarts++;
+    return request(method,params,options);
+  };
+  await assert.rejects(
+    ()=>service.startTurn({threadId:thread.id,prompt:'Must not execute',editing:false}),
+    error=>error.code===-32601&&error.turnStage==='THREAD_READ');
+  assert.equal(turnStarts,0);
+  assert.equal(service.running.size,0);
+});
