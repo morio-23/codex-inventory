@@ -383,17 +383,41 @@ test('turn rejection shows actionable category without raw workspace secrets (@m
   const unsafePath='C:\\\\Users\\\\synthetic-private\\\\ProjectSecret';
   await page.route('**/api/threads/*/turn',route=>route.fulfill({
     status:409,contentType:'application/json',
-    body:JSON.stringify({error:'別プロジェクトのチャットです '+unsafePath+' token-secret'})
+    body:JSON.stringify({error:'別プロジェクトのチャットです '+unsafePath+' token-secret',
+      turnStage:'WORKSPACE_SCOPE',rpcCode:-32602})
   }));
   await page.locator('#prompt').fill('synthetic unchanged draft');
   await page.locator('#run').click();
-  await expect(page.locator('#notice')).toContainText('[WORKSPACE_MISMATCH]');
+  await expect(page.locator('#notice')).toContainText('[WORKSPACE_MISMATCH / WORKSPACE_SCOPE / RPC -32602]');
   await expect(page.locator('#notice')).toContainText('所属プロジェクト');
   await expect(page.locator('#notice')).not.toContainText('synthetic-private');
   await expect(page.locator('#notice')).not.toContainText('token-secret');
   await expect(page.locator('#prompt')).toHaveValue('synthetic unchanged draft');
   await expect(page.locator('#log')).not.toContainText('synthetic unchanged draft');
   await expect(page.locator('#stop')).toBeDisabled();
+});
+
+
+test('real-shape unknown RPC refusal identifies phase and retains input without raw error (@mock)',async({page})=>{
+  box=await sandbox();
+  const {url}=await box.start();
+  await page.goto(url);
+  await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await createChat(page);
+  await page.route('**/api/threads/*/turn',route=>route.fulfill({
+    status:503,contentType:'application/json',
+    body:JSON.stringify({
+      error:'Synthetic unknown Codex refusal at C:\\\\Users\\\\PrivateSynthetic\\\\secrets',
+      turnStage:'TURN_START_RPC',rpcCode:-32602
+    })
+  }));
+  await page.locator('#prompt').fill('do not submit a real turn');
+  await page.locator('#run').click();
+  await expect(page.locator('#notice'))
+    .toContainText('[TURN_REJECTED / TURN_START_RPC / RPC -32602]');
+  await expect(page.locator('#notice')).not.toContainText('PrivateSynthetic');
+  await expect(page.locator('#prompt')).toHaveValue('do not submit a real turn');
+  await expect(page.locator('#log')).not.toContainText('do not submit a real turn');
 });
 
 test('authenticated Codex CLI shares Desktop history and resumes a real thread @real',async({page})=>{
