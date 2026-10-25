@@ -163,7 +163,15 @@ async function api(path, options={}, context=null) {
   }});
   let result;
   try {result=await response.json();}catch{throw Error('サーバー応答が読み取れません');}
-  if (!response.ok) throw Error(result.error || `HTTP ${response.status}`);
+  if(!response.ok){
+    const error=new Error(result.error || `HTTP ${response.status}`);
+    // Keep HTTP/RPC diagnostics as ephemeral primitives. Never serialize the
+    // raw server message to notices or logs.
+    error.turnStage=typeof result.turnStage==='string'?result.turnStage:null;
+    error.rpcCode=Number.isSafeInteger(result.rpcCode)?result.rpcCode:null;
+    error.httpStatus=response.status;
+    throw error;
+  }
   return result;
 }
 const post = body => ({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
