@@ -1,5 +1,6 @@
 import { renderMarkdown } from './markdown.js';
 import { SplitPane } from './split-pane.js';
+import { turnFailureNotice } from './turn-error-ui.js';
 import { ActivityTimeline, activityFromCodex } from './activity-feed-state.js';
 import { DisplayLabels } from './display-labels.js';
 import { conflictCandidates } from './conflict-warning-state.js';
@@ -608,7 +609,7 @@ async function run(){
   }catch(e){
     runningThreads.delete(id);updateButtons();drawThreads();
     logs.set(id,(logs.get(id)||[]).filter(entry=>entry!==optimistic));if(activeThreadId===id)drawLog();
-    notify('実行を開始できません。対象チャットを確認してください',true);
+    notify(turnFailureNotice(e,getLanguage()).text,true);
   }
 }
 function completionNotificationsEnabled(){
