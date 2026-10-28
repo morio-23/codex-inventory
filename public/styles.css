@@ -581,6 +581,8 @@ html[lang="en"] .hotbar-controls button{
 .secondary-quest[hidden]{display:none!important}
 .secondary-quest,.secondary-quest .quest-paper,.secondary-quest .quest-header{min-width:0}
 .split-paper{padding:12px}
+.split-project-picker{display:block;min-width:0;margin:0 0 10px;font-weight:900;font-size:12px}
+.split-project-picker select{display:block;margin-top:5px}
 .split-paper select{max-width:100%;width:100%;height:34px;border:2px solid #8f9a86;background:#f9f7e9;color:#29392e;padding:5px}
 .split-thread-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px;align-items:end}
 .split-thread-controls label{grid-column:1/-1;font-weight:900;font-size:12px}
