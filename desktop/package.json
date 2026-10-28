@@ -22,6 +22,7 @@
       "main.cjs",
       "smoke-profile.cjs",
       "window-health.cjs",
+      "context-menu.cjs",
       "codex-detect.mjs",
       "package.json",
       "preload.cjs"
