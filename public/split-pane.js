@@ -41,6 +41,7 @@ export class SplitPane {
     this.mobilePane='primary';
     this.width=50;
     this.restoredThreadId=null;
+    this.restoredProject='';
     this.enabled=false;
     this.loading=false;
     this.toggle.addEventListener('click',()=>this.setSplit(!this.enabled));
@@ -109,6 +110,7 @@ export class SplitPane {
     try{
       this.enabled=localStorage.getItem('codex-inventory:split-enabled')==='on';
       this.restoredThreadId=localStorage.getItem('codex-inventory:split-thread')||null;
+      this.restoredProject=localStorage.getItem('codex-inventory:split-project')||'';
       const savedWidth=Number(localStorage.getItem('codex-inventory:split-width'));
       if(Number.isFinite(savedWidth)&&savedWidth>=28&&savedWidth<=72)this.width=savedWidth;
     }catch{}
@@ -268,7 +270,10 @@ export class SplitPane {
     this.threadId=null;
     this.restoredThreadId=null;
     this.renderedThreadId=null;
-    try{localStorage.removeItem('codex-inventory:split-thread');}catch{}
+    try{
+      localStorage.removeItem('codex-inventory:split-thread');
+      localStorage.setItem('codex-inventory:split-project',project.cwd);
+    }catch{}
     this.restoreChatState(null);
     this.populateProjects();
     this.populateThreadOptions();
@@ -291,7 +296,7 @@ export class SplitPane {
         threadData.threads.filter(t=>t&&typeof t.id==='string'&&typeof t.cwd==='string'):[];
       const prior=this.threadId||this.restoredThreadId;
       const remembered=this.threads.find(t=>t.id===prior);
-      const preferred=[this.workspace,remembered?.cwd,this.getPrimaryWorkspace?.(),projectData.workspace];
+      const preferred=[this.workspace,remembered?.cwd,this.restoredProject,this.getPrimaryWorkspace?.(),projectData.workspace];
       const selected=preferred.map(path=>this.projects.find(p=>p.exists&&projectKey(p.cwd)===projectKey(path)))
         .find(Boolean)||this.projects.find(p=>p.exists);
       const nextWorkspace=selected?.cwd||'';
@@ -302,6 +307,7 @@ export class SplitPane {
         this.output.replaceChildren();
       }
       this.workspace=nextWorkspace;
+      if(!nextWorkspace)try{localStorage.removeItem('codex-inventory:split-project');}catch{}
       this.populateProjects();
       const found=this.populateThreadOptions();
       if(found&&this.threadId!==found.id)await this.selectThread(found.id);
@@ -311,7 +317,7 @@ export class SplitPane {
         this.restoreChatState(null);this.output.replaceChildren();
       }
       this.updateButtons();
-      this.restoredThreadId=null;
+      this.restoredThreadId=null;this.restoredProject='';
     }catch{
       this.notify('分割画面のプロジェクト・チャット一覧を取得できませんでした',true);
     }finally{
