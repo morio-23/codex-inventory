@@ -1670,6 +1670,11 @@ test('freshly registered zero-chat project appears in split picker and creates a
     // Left and right workspace selections must be independent.
     await page.locator('#project-select').selectOption(box.beta);
     await expect(page.locator('#secondary-project')).toHaveValue(gamma);
+    // An explicitly chosen project must survive reload even before a chat exists.
+    await page.reload();
+    await expect(page.locator('#secondary-project')).toHaveValue(gamma);
+    await expect(page.locator('#secondary-thread option')).toHaveCount(1);
+    await expect(page.locator('#secondary-new')).toBeEnabled();
     const requestPromise=page.waitForRequest(r=>r.url().endsWith('/api/threads')&&r.method()==='POST');
     await page.locator('#secondary-new').click();
     const request=await requestPromise;
