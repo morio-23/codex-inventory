@@ -1660,8 +1660,7 @@ test('freshly registered zero-chat project appears in split picker and creates a
     // Matches the registration operation used by Electron's trusted + dialog.
     await backend.service.registerProject(gamma);
     await page.locator('#project-refresh').click();
-    await expect.poll(async()=>page.locator('#secondary-project option')
-      .evaluateAll((nodes,expected)=>nodes.some(node=>node.value===expected),gamma)).toBe(true);
+    await expect(page.locator('#secondary-project option')).toHaveCount(4);
     await page.locator('#secondary-project').selectOption(gamma);
     await expect(page.locator('#secondary-project')).toHaveValue(gamma);
     await expect(page.locator('#secondary-thread option')).toHaveCount(1);
