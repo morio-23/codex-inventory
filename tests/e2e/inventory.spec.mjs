@@ -1661,7 +1661,7 @@ test('freshly registered zero-chat project appears in split picker and creates a
     await backend.service.registerProject(gamma);
     await page.locator('#project-refresh').click();
     await expect.poll(async()=>page.locator('#secondary-project option')
-      .evaluateAll(nodes=>nodes.map(node=>node.value).includes(gamma))).toBe(true);
+      .evaluateAll((nodes,expected)=>nodes.some(node=>node.value===expected),gamma)).toBe(true);
     await page.locator('#secondary-project').selectOption(gamma);
     await expect(page.locator('#secondary-project')).toHaveValue(gamma);
     await expect(page.locator('#secondary-thread option')).toHaveCount(1);
