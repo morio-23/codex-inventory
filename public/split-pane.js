@@ -1,12 +1,16 @@
 // Independent secondary view for concurrent Codex work. No sensitive data is persisted in Git.
 import {turnFailureNotice} from './turn-error-ui.js';
+// Windows paths are case-insensitive; Linux/macOS paths retain their case.
+// These are comparison keys only. HTTP calls always use the original cwd.
+const projectKey=path=>typeof path==='string'
+  ?(/^[A-Za-z]:[\\/]/.test(path)?path.replace(/\\/g,'/').replace(/\/+$/,'').toLowerCase():path.replace(/\/+$/,'')):'';
 export class SplitPane {
   constructor({api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,getRunning,getTurnId,setTurnId,
     getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus,
-    labelThread,onVisibilityChange}) {
+    labelThread,labelProject,getPrimaryWorkspace,onVisibilityChange}) {
     Object.assign(this,{api,post,notify,getLanguage,getLocale,getCatalog,getPrimaryThreadId,
       getRunning,getTurnId,setTurnId,getMessages,setMessages,appendMessage,renderMarkdown,getApprovals,afterApproval,refreshApprovals,onSharedStatus,
-      labelThread,onVisibilityChange});
+      labelThread,labelProject,getPrimaryWorkspace,onVisibilityChange});
     this.root=document.getElementById('secondary-pane');
     this.wrap=document.getElementById('quest-panes');
     this.primary=document.getElementById('primary-pane');
@@ -17,6 +21,7 @@ export class SplitPane {
     this.layout=document.querySelector('.app-layout');
     this.toggle=document.getElementById('split-toggle');
     this.threadSelect=document.getElementById('secondary-thread');
+    this.projectSelect=document.getElementById('secondary-project');
     this.prompt=document.getElementById('secondary-prompt');
     this.model=document.getElementById('secondary-model');
     this.effort=document.getElementById('secondary-effort');
@@ -29,6 +34,8 @@ export class SplitPane {
     this.threadId=null;
     this.workspace='';
     this.threads=[];
+    this.projects=[];
+    this.refreshQueued=false;
     this.chatState=new Map();
     this.renderedThreadId=null;
     this.mobilePane='primary';
@@ -38,6 +45,7 @@ export class SplitPane {
     this.loading=false;
     this.toggle.addEventListener('click',()=>this.setSplit(!this.enabled));
     this.threadSelect.addEventListener('change',()=>void this.selectThread(this.threadSelect.value));
+    this.projectSelect.addEventListener('change',()=>this.selectProject(this.projectSelect.value));
     this.model.addEventListener('change',()=>{this.fillModels(true);this.saveChatState();});
     for(const control of [this.prompt,this.effort,this.editing,this.action])
       control.addEventListener(control===this.prompt?'input':'change',()=>this.saveChatState());
@@ -211,37 +219,112 @@ export class SplitPane {
   shortLabel(thread,index){
     return this.labelThread?.(thread)||(this.getLanguage()==='en'?'Chat ':'チャット ')+(index+1);
   }
+  // The project list includes folders registered from the native + dialog,
+  // even when they have no Codex threads yet.
+  populateProjects(){
+    this.projectSelect.replaceChildren();
+    const placeholder=document.createElement('option');
+    placeholder.value='';
+    placeholder.textContent=this.getLanguage()==='en'?'Select a project':'プロジェクトを選択';
+    this.projectSelect.append(placeholder);
+    for(const project of this.projects){
+      if(!project||typeof project.cwd!=='string')continue;
+      const option=document.createElement('option');
+      option.value=project.cwd;
+      option.dataset.i18nIgnore='';
+      option.textContent=(this.labelProject?.(project.cwd)||project.name||'Project')+
+        ' · '+(Number(project.threadCount)||0)+(this.getLanguage()==='en'?' chats':'件');
+      option.disabled=!project.exists;
+      this.projectSelect.append(option);
+    }
+    const matching=this.projects.find(p=>p.exists&&projectKey(p.cwd)===projectKey(this.workspace));
+    this.projectSelect.value=matching?.cwd||'';
+    this.projectSelect.disabled=!this.enabled||!this.projects.some(p=>p.exists);
+  }
+  populateThreadOptions(){
+    const prior=this.threadId||this.restoredThreadId;
+    this.threadSelect.replaceChildren();
+    const empty=document.createElement('option');
+    empty.value='';
+    empty.textContent=this.getLanguage()==='en'?'Select another chat':'別のチャットを選択';
+    this.threadSelect.append(empty);
+    const available=this.threads.filter(t=>projectKey(t.cwd)===projectKey(this.workspace));
+    available.forEach((thread,i)=>{
+      const option=document.createElement('option');
+      option.value=thread.id;option.dataset.i18nIgnore='';
+      option.textContent=this.shortLabel(thread,i);
+      this.threadSelect.append(option);
+    });
+    const found=available.find(t=>t.id===prior);
+    this.threadSelect.value=found?.id||'';
+    return found;
+  }
+  selectProject(cwd){
+    const project=this.projects.find(p=>p.exists&&projectKey(p.cwd)===projectKey(cwd));
+    if(!project)return;
+    if(projectKey(project.cwd)===projectKey(this.workspace))return;
+    this.saveChatState();
+    this.workspace=project.cwd;
+    this.threadId=null;
+    this.restoredThreadId=null;
+    this.renderedThreadId=null;
+    try{localStorage.removeItem('codex-inventory:split-thread');}catch{}
+    this.restoreChatState(null);
+    this.populateProjects();
+    this.populateThreadOptions();
+    this.output.replaceChildren();
+    this.updateButtons();
+    this.renderApprovals();
+    this.onVisibilityChange?.();
+  }
   async refreshThreads(){
-    if(!this.enabled||this.loading)return;
+    if(!this.enabled)return;
+    if(this.loading){this.refreshQueued=true;return;}
     this.loading=true;
     try{
-      const data=await this.api('/api/threads?all=1');
-      this.threads=Array.isArray(data.threads)?data.threads.filter(x=>x&&typeof x.id==='string'&&typeof x.cwd==='string'):[];
+      const [projectData,threadData]=await Promise.all([
+        this.api('/api/projects'),this.api('/api/threads?all=1')
+      ]);
+      this.projects=Array.isArray(projectData.projects)?
+        projectData.projects.filter(p=>p&&typeof p.cwd==='string'):[];
+      this.threads=Array.isArray(threadData.threads)?
+        threadData.threads.filter(t=>t&&typeof t.id==='string'&&typeof t.cwd==='string'):[];
       const prior=this.threadId||this.restoredThreadId;
-      this.threadSelect.replaceChildren();
-      const empty=document.createElement('option');empty.value='';empty.textContent=this.getLanguage()==='en'?'Select another chat':'別のチャットを選択';this.threadSelect.append(empty);
-      this.threads.forEach((thread,i)=>{
-        const opt=document.createElement('option');opt.value=thread.id;opt.dataset.i18nIgnore='';opt.textContent=this.shortLabel(thread,i);
-        this.threadSelect.append(opt);
-      });
-      const found=this.threads.find(x=>x.id===prior);
-      this.threadSelect.value=found?.id||'';
-      if(found&&this.threadId!==found.id)await this.selectThread(found.id);
-      else if(found)this.workspace=found.cwd;
-      else{
-        this.threadId=null;this.workspace='';this.prompt.value='';this.output.replaceChildren();
-        try{localStorage.removeItem('codex-inventory:split-thread');}catch{}
-        this.updateButtons();
+      const remembered=this.threads.find(t=>t.id===prior);
+      const preferred=[this.workspace,remembered?.cwd,this.getPrimaryWorkspace?.(),projectData.workspace];
+      const selected=preferred.map(path=>this.projects.find(p=>p.exists&&projectKey(p.cwd)===projectKey(path)))
+        .find(Boolean)||this.projects.find(p=>p.exists);
+      const nextWorkspace=selected?.cwd||'';
+      if(projectKey(this.workspace)!==projectKey(nextWorkspace)){
+        this.saveChatState();
+        this.threadId=null;this.renderedThreadId=null;
+        this.restoreChatState(null);
+        this.output.replaceChildren();
       }
+      this.workspace=nextWorkspace;
+      this.populateProjects();
+      const found=this.populateThreadOptions();
+      if(found&&this.threadId!==found.id)await this.selectThread(found.id);
+      else if(!found&&this.threadId){
+        this.saveChatState();this.threadId=null;this.renderedThreadId=null;
+        try{localStorage.removeItem('codex-inventory:split-thread');}catch{}
+        this.restoreChatState(null);this.output.replaceChildren();
+      }
+      this.updateButtons();
       this.restoredThreadId=null;
-    }catch{this.notify('分割画面のチャット一覧を取得できませんでした',true);}
-    finally{this.loading=false;}
+    }catch{
+      this.notify('分割画面のプロジェクト・チャット一覧を取得できませんでした',true);
+    }finally{
+      this.loading=false;
+      if(this.refreshQueued){this.refreshQueued=false;void this.refreshThreads();}
+    }
   }
   async selectThread(id){
     this.saveChatState();
-    const thread=this.threads.find(x=>x.id===id);
+    // A chat may only be selected within the secondary project.
+    const thread=this.threads.find(x=>x.id===id&&
+      projectKey(x.cwd)===projectKey(this.workspace));
     this.threadId=thread?.id||null;
-    this.workspace=thread?.cwd||'';
     this.threadSelect.value=this.threadId||'';
     this.restoreChatState(this.threadId);
     try{
@@ -304,8 +387,9 @@ export class SplitPane {
     status.dataset.state=running?'running':'idle';
     document.getElementById('secondary-send').disabled=!has||running||duplicate;
     document.getElementById('secondary-stop').disabled=!has||!running||duplicate;
-    document.getElementById('secondary-new').disabled=!this.workspace;
-    this.threadSelect.disabled=!this.enabled;
+    document.getElementById('secondary-new').disabled=!this.enabled||!this.workspace;
+    this.threadSelect.disabled=!this.enabled||!this.workspace;
+    this.projectSelect.disabled=!this.enabled||!this.projects.some(project=>project.exists);
   }
   renderLog(){
     const root=this.output;
