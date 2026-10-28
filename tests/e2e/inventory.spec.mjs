@@ -4,6 +4,7 @@ import {createServer} from 'node:net';
 import {mkdtemp,mkdir,rm,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {startInventoryServer} from '../../server.mjs';
 import {fileURLToPath} from 'node:url';
 
 const root=resolve(fileURLToPath(new URL('../..',import.meta.url)));
@@ -1623,6 +1624,7 @@ test('split chats run in separate discovered workspaces without changing the pro
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
   await page.locator('#split-toggle').click();
+  await page.locator('#secondary-project').selectOption(box.alpha);
   await page.locator('#secondary-thread').selectOption('mock-alpha-auto');
   await page.locator('#prompt').fill('beta parallel request');
   await page.locator('#run').click();
@@ -1634,6 +1636,57 @@ test('split chats run in separate discovered workspaces without changing the pro
   const history=async id=>(await (await fetch(url+'/api/threads/'+id)).json()).messages||[];
   await expect.poll(async()=>[(await history('mock-beta-auto')).some(x=>x.role==='assistant'&&x.text.includes('beta parallel request')),
     (await history('mock-alpha-auto')).some(x=>x.role==='assistant'&&x.text.includes('alpha parallel request'))]).toEqual([true,true]);
+});
+
+test('freshly registered zero-chat project appears in split picker and creates a scoped chat (@mock)',async({page})=>{
+  box=await seededProjects();
+  const gamma=join(box.directory,'fresh-zero-chat-project');
+  await mkdir(gamma);
+  const backend=await startInventoryServer({
+    command:process.execPath,
+    commandArgs:[join(root,'tests/fixtures/mock-app-server.mjs')],
+    commandEnv:{...process.env,MOCK_STORE_FILE:box.store},
+    cwd:root,selectedWorkspace:null,listenPort:0,
+    knownProjects:[box.alpha,box.beta]
+  });
+  try{
+    const url=backend.url;
+    const errors=browserErrors(page);
+    await page.goto(url);
+    await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+    await expect(page.locator('#project-select')).toHaveValue(box.beta);
+    await page.locator('#split-toggle').click();
+    await expect(page.locator('#secondary-project option')).toHaveCount(3);
+    // Matches the registration operation used by Electron's trusted + dialog.
+    await backend.service.registerProject(gamma);
+    await page.locator('#project-refresh').click();
+    await expect.poll(async()=>page.locator('#secondary-project option')
+      .evaluateAll(nodes=>nodes.map(node=>node.value).includes(gamma))).toBe(true);
+    await page.locator('#secondary-project').selectOption(gamma);
+    await expect(page.locator('#secondary-project')).toHaveValue(gamma);
+    await expect(page.locator('#secondary-thread option')).toHaveCount(1);
+    await expect(page.locator('#secondary-new')).toBeEnabled();
+    await expect(page.locator('#secondary-send')).toBeDisabled();
+    // Left and right workspace selections must be independent.
+    await page.locator('#project-select').selectOption(box.beta);
+    await expect(page.locator('#secondary-project')).toHaveValue(gamma);
+    const requestPromise=page.waitForRequest(r=>r.url().endsWith('/api/threads')&&r.method()==='POST');
+    await page.locator('#secondary-new').click();
+    const request=await requestPromise;
+    expect(decodeURIComponent(request.headers()['x-codex-workspace'])).toBe(gamma);
+    await expect(page.locator('#secondary-thread option')).toHaveCount(2);
+    await expect.poll(()=>page.locator('#secondary-thread').inputValue()).not.toBe('');
+    const id=await page.locator('#secondary-thread').inputValue();
+    const fetched=await page.request.get(url+'api/threads/'+encodeURIComponent(id));
+    expect(fetched.ok()).toBeTruthy();
+    expect((await fetched.json()).thread.cwd).toBe(gamma);
+    await expect(page.locator('#project-select')).toHaveValue(box.beta);
+    await page.reload();
+    await expect(page.locator('#secondary-project')).toHaveValue(gamma);
+    await expect(page.locator('#secondary-thread')).toHaveValue(id);
+    expect(errors.consoleErrors).toEqual([]);
+    expect(errors.httpErrors).toEqual([]);
+  }finally{await backend.stop();}
 });
 
 test('SSE reconnect reloads a secondary chat that completed while events were unavailable (@mock)',async({page})=>{
@@ -1688,6 +1741,7 @@ test('a stale secondary history response cannot erase a newer SSE reply (@mock)'
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY',{timeout:15000});
   expect(rendererErrors).toEqual([]);
   await page.locator('#split-toggle').click();
+  await page.locator('#secondary-project').selectOption(box.alpha);
   await page.locator('#secondary-thread').selectOption('mock-alpha-auto');
   await expect(page.locator('#secondary-log')).toContainText('ANSWER_ALPHA');
   let snapshotTaken,releaseSnapshot;
@@ -1933,6 +1987,7 @@ test('three chats across two workspaces keep activity, approvals and stops corre
   const a2Label=await page.locator(`.thread-item[data-thread-id="${a2}"] .thread-name`).textContent();
   await page.locator(`.thread-item[data-thread-id="${a1}"]`).click();
   await page.locator('#split-toggle').click();
+  await page.locator('#secondary-project').selectOption(box.beta);
   await page.locator('#secondary-thread').selectOption(b1);
   await expect(page.locator('#secondary-pane')).toBeVisible();
 
@@ -1981,6 +2036,7 @@ test('three chats across two workspaces keep activity, approvals and stops corre
 
   await page.locator('#split-toggle').click();
   await page.locator('#split-toggle').click();
+  await page.locator('#secondary-project').selectOption(box.beta);
   await page.locator('#secondary-thread').selectOption(b1);
   await page.setViewportSize({width:390,height:844});
   await page.getByRole('tab',{name:/second|右|2/i}).click();
@@ -2063,6 +2119,8 @@ test('official Codex conversation title outranks preview in primary and split hi
   await expect(page.locator('.thread-item[data-thread-id="mock-beta-auto"] .thread-name')).toHaveText('正式なチャット名');
   await page.locator('#split-toggle').click();
   await expect(page.locator('#secondary-thread option[value="mock-beta-auto"]')).toHaveText('正式なチャット名');
+  await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveCount(0);
+  await page.locator('#secondary-project').selectOption(box.alpha);
   await expect(page.locator('#secondary-thread option[value="mock-alpha-auto"]')).toHaveText('Alpha project');
   await page.locator('#ui-language').selectOption('en');
   await expect(page.locator('#active-thread')).toHaveText('正式なチャット名');
