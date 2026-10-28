@@ -1622,10 +1622,14 @@ test('split chats run in separate discovered workspaces without changing the pro
   const {url}=await box.start({CODEX_WORKSPACE:'',MOCK_TURN_DELAY_MS:'1200'});
   await page.goto(url);
   await expect(page.locator('#connection')).toHaveText('APP SERVER READY');
+  await expect(page.locator('html')).toHaveAttribute('data-inventory-boot','ready');
   await expect(page.locator('#project-select')).toHaveValue(box.beta);
   await page.locator('#split-toggle').click();
   await page.locator('#secondary-project').selectOption(box.alpha);
-  await page.locator('#secondary-thread').selectOption('mock-alpha-auto');
+  // The project dropdown itself must switch the visible right chat.
+  await expect(page.locator('#secondary-thread')).toHaveValue('mock-alpha-auto');
+  await expect(page.locator('#secondary-status')).toHaveText('待機中');
+  await expect(page.locator('#project-select')).toHaveValue(box.beta);
   await page.locator('#prompt').fill('beta parallel request');
   await page.locator('#run').click();
   await page.locator('#secondary-prompt').fill('alpha parallel request');

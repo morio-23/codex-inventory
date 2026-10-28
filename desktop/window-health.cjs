@@ -15,7 +15,8 @@ const RENDER_PROBE = `(() => {
     visible: Boolean(shell && getComputedStyle(shell).display !== 'none' &&
       getComputedStyle(shell).visibility !== 'hidden'),
     stylesheet: document.styleSheets.length > 0 &&
-      css.backgroundImage !== 'none'
+      css.backgroundImage !== 'none',
+    startup: document.documentElement.dataset.inventoryBoot || 'pending'
   };
 })()`;
 
@@ -26,6 +27,10 @@ function classifyDocumentHealth(result) {
     return 'UI_NOT_VISIBLE';
   if (result.stylesheet !== true)
     return 'UI_STYLES_MISSING';
+  if (result.startup === 'failed')
+    return 'UI_RENDERER_INIT_FAILED';
+  if (result.startup !== 'ready')
+    return 'UI_RENDERER_NOT_READY';
   return 'UI_READY';
 }
 

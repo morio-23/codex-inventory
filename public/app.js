@@ -1585,5 +1585,10 @@ async function boot(){
   listRefresh=setInterval(refreshThreads,15000);
   usageRefresh=setInterval(refreshUsage,60000);
   statusRefresh=setInterval(refreshStatus,3000);
+  // Packaged Electron must not treat static HTML as a fully loaded chat UI.
+  document.documentElement.dataset.inventoryBoot='ready';
 }
-boot();
+boot().catch(()=>{
+  // Never put raw errors, paths, tokens, or conversation content in the DOM.
+  document.documentElement.dataset.inventoryBoot='failed';
+});

@@ -261,7 +261,7 @@ export class SplitPane {
     this.threadSelect.value=found?.id||'';
     return found;
   }
-  selectProject(cwd){
+  async selectProject(cwd){
     const project=this.projects.find(p=>p.exists&&projectKey(p.cwd)===projectKey(cwd));
     if(!project)return;
     if(projectKey(project.cwd)===projectKey(this.workspace))return;
@@ -281,6 +281,12 @@ export class SplitPane {
     this.updateButtons();
     this.renderApprovals();
     this.onVisibilityChange?.();
+    // Changing the right project should visibly switch to one of its chats,
+    // without changing the left pane. Zero-chat projects remain unselected.
+    const first=this.threads.find(thread=>projectKey(thread.cwd)===projectKey(project.cwd) &&
+      thread.id!==this.getPrimaryThreadId())||
+      this.threads.find(thread=>projectKey(thread.cwd)===projectKey(project.cwd));
+    if(first)await this.selectThread(first.id);
   }
   async refreshThreads(){
     if(!this.enabled)return;

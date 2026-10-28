@@ -8,6 +8,7 @@ import {inspectUiResources,requiredUiResources} from '../scripts/check-packaged-
 const require=createRequire(import.meta.url);
 const {RENDER_PROBE,classifyDocumentHealth,countVisualColorBuckets}=
   require('../desktop/window-health.cjs');
+const {contextMenuItems}=require('../desktop/context-menu.cjs');
 const root=dirname(dirname(fileURLToPath(import.meta.url)));
 
 test('source UI assets match explicit packaged inventory',()=>{
@@ -19,8 +20,10 @@ test('source UI assets match explicit packaged inventory',()=>{
 test('packaged Electron includes render guard',()=>{
   const pkg=require('../desktop/package.json');
   assert.ok(pkg.build.files.includes('window-health.cjs'));
+  assert.ok(pkg.build.files.includes('context-menu.cjs'));
   assert.match(RENDER_PROBE,/querySelector\('main\.shell'\)/);
   assert.match(RENDER_PROBE,/getComputedStyle/);
+  assert.match(RENDER_PROBE,/inventoryBoot/);
 });
 
 test('a missing or invisible app never reports render success',()=>{
@@ -29,7 +32,10 @@ test('a missing or invisible app never reports render success',()=>{
   assert.equal(classifyDocumentHealth({structure:true,size:false,visible:true,stylesheet:true}),'UI_NOT_VISIBLE');
   assert.equal(classifyDocumentHealth({structure:true,size:true,visible:false,stylesheet:true}),'UI_NOT_VISIBLE');
   assert.equal(classifyDocumentHealth({structure:true,size:true,visible:true,stylesheet:false}),'UI_STYLES_MISSING');
-  assert.equal(classifyDocumentHealth({structure:true,size:true,visible:true,stylesheet:true}),'UI_READY');
+  const healthy={structure:true,size:true,visible:true,stylesheet:true};
+  assert.equal(classifyDocumentHealth(healthy),'UI_RENDERER_NOT_READY');
+  assert.equal(classifyDocumentHealth({...healthy,startup:'failed'}),'UI_RENDERER_INIT_FAILED');
+  assert.equal(classifyDocumentHealth({...healthy,startup:'ready'}),'UI_READY');
 });
 
 test('uniform blank framebuffer is distinguishable from a real multicolor UI',()=>{
@@ -45,4 +51,18 @@ test('uniform blank framebuffer is distinguishable from a real multicolor UI',()
   }
   assert.ok(countVisualColorBuckets(rendered,w,h)>5);
   assert.equal(countVisualColorBuckets(Buffer.alloc(0),w,h),0);
+});
+
+test('native context menu exposes only safe editing and selection roles',()=>{
+  assert.deepEqual(contextMenuItems({isEditable:false,selectionText:''}),[]);
+  const editable=contextMenuItems({isEditable:true,selectionText:''},'ja');
+  assert.deepEqual(editable.filter(item=>item.role).map(item=>item.role),
+    ['undo','redo','cut','copy','paste','selectAll']);
+  assert.equal(editable.find(item=>item.role==='paste').label,'貼り付け');
+  assert.equal(contextMenuItems({isEditable:true},'en')
+    .find(item=>item.role==='paste').label,'Paste');
+  assert.deepEqual(contextMenuItems({isEditable:false,selectionText:'example'},'en')
+    .filter(item=>item.role).map(item=>item.role),['copy','selectAll']);
+  assert.ok(contextMenuItems({isEditable:true})
+    .every(item=>item.role||item.type==='separator'));
 });

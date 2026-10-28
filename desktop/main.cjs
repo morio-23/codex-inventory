@@ -1,9 +1,10 @@
 'use strict';
-const {app,BrowserWindow,Notification,dialog,shell,session,ipcMain}=require('electron');
+const {app,BrowserWindow,Menu,Notification,dialog,shell,session,ipcMain}=require('electron');
 const {join}=require('node:path');
 const {tmpdir}=require('node:os');
 const {isolatedSmokeProfile}=require('./smoke-profile.cjs');
 const {RENDER_PROBE,classifyDocumentHealth,countVisualColorBuckets}=require('./window-health.cjs');
+const {contextMenuItems}=require('./context-menu.cjs');
 const {readFile,writeFile,mkdir}=require('node:fs/promises');
 const {pathToFileURL}=require('node:url');
 
@@ -139,67 +140,99 @@ function openWindow(url){
     event.preventDefault();
   });
   win.webContents.on('will-attach-webview',event=>event.preventDefault());
-  win.once('ready-to-show',()=>{if(!win.isDestroyed())win.show();});
+  // Electron does not create a default editing context menu. Provide only
+  // native edit/copy roles for trusted Inventory text controls and selections.
+  win.webContents.on('context-menu',(_event,params)=>{
+    try{if(new URL(win.webContents.getURL()).origin!==allowedOrigin)return;}
+    catch{return;}
+    if(win.isDestroyed())return;
+    const items=contextMenuItems(params,nativeLocale);
+    if(items.length)Menu.buildFromTemplate(items).popup({window:win});
+  });
+  // Only show the window after the renderer has fully booted and painted.
   win.on('closed',()=>{if(mainWindow===win)mainWindow=null;});
 
-  // Previously the packaged smoke verified HTTP connectivity only: Electron
-  // could show a featureless #253028 window yet pass all release checks.
-  // Validate the actual DOM/CSS load and, in synthetic smoke, a non-uniform
-  // captured framebuffer before accepting the packaged GUI as working.
-  async function renderAndCheck(){
+  // Cold Windows launches can finish loading HTML before the module boot
+  // has finished. Require the renderer-ready marker, then a painted frame.
+  const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  async function loadAndWaitForRenderer(){
+    let loadTimer;
     try{
-      // Never leave a stalled navigation showing the BrowserWindow background.
-      let loadTimer;
-      try {
-        await Promise.race([
-          win.loadURL(url),
-          new Promise((_resolve,reject)=>{
-            loadTimer=setTimeout(()=>reject(Object.assign(
-              new Error('UI_LOAD_TIMEOUT'),{code:'UI_LOAD_TIMEOUT'})),15000);
-          })
-        ]);
-      } finally { clearTimeout(loadTimer); }
-      if(win.isDestroyed())return;
-      const health=await win.webContents.executeJavaScript(RENDER_PROBE,true);
-      const code=classifyDocumentHealth(health);
-      if(code!=='UI_READY')throw Object.assign(new Error(code),{code});
-      // A valid DOM is insufficient if Chromium renders a blank window.
-      // Inspect colors entirely in memory; never save screenshots or UI text.
-      if(!win.isVisible())win.show();
-      await new Promise(resolve=>setTimeout(resolve,350));
-      if(win.isDestroyed())return;
-      const capture=await win.capturePage();
-      const size=capture.getSize();
-      const colors=countVisualColorBuckets(capture.toBitmap(),size.width,size.height);
-      if(colors<5)throw Object.assign(new Error('UI_BLANK_FRAME'),{code:'UI_BLANK_FRAME'});
-      if(smokeProfile){
-        await writeFile(join(app.getPath('userData'),'ui-smoke-ready.json'),
-          JSON.stringify({status:'UI_READY',painted:true}),'utf8');
-      }
-    }catch(error){
-      if(win.isDestroyed())return;
-      const known=new Set(['UI_DOCUMENT_MISSING','UI_NOT_VISIBLE','UI_STYLES_MISSING','UI_BLANK_FRAME','UI_LOAD_TIMEOUT']);
-      const code=known.has(error?.code)?error.code:'UI_LOAD_FAILED';
-      if(smokeProfile){
-        // Only fixed codes are persisted inside the throwaway smoke profile.
-        // Never record the URL, console, application data or project paths.
-        await writeFile(join(app.getPath('userData'),'ui-smoke-ready.json'),
-          JSON.stringify({status:'UI_FAIL',code}),'utf8').catch(()=>{});
-        return;
-      }
-      const answer=await dialog.showMessageBox({
-        type:'error',
-        title:desktopText('表示エラー','Display error'),
-        message:desktopText('画面の読み込みに失敗しました','Could not render Codex Inventory'),
-        detail:desktopText('診断コード: ','Diagnostic code: ')+code+
-          desktopText('\n再読込しても直らない場合は、このコードのみ共有してください。',
-            '\nIf reloading does not help, share only this diagnostic code.'),
-        buttons:nativeLocale==='en'?['Retry','Close']:['再読込','終了'],
-        defaultId:0,cancelId:1,noLink:true
-      });
-      if(answer.response===0&&!closing&&!win.isDestroyed())void renderAndCheck();
-      else app.quit();
+      await Promise.race([
+        win.loadURL(url),
+        new Promise((_resolve,reject)=>{
+          loadTimer=setTimeout(()=>reject(Object.assign(
+            new Error('UI_LOAD_TIMEOUT'),{code:'UI_LOAD_TIMEOUT'})),20000);
+        })
+      ]);
+    }finally{clearTimeout(loadTimer);}
+    const deadline=Date.now()+20000;
+    let code='UI_RENDERER_NOT_READY';
+    while(!win.isDestroyed()&&Date.now()<deadline){
+      try{
+        const result=await win.webContents.executeJavaScript(RENDER_PROBE,true);
+        code=classifyDocumentHealth(result);
+      }catch{code='UI_LOAD_FAILED';}
+      if(code==='UI_READY')return;
+      if(code==='UI_RENDERER_INIT_FAILED')break;
+      await sleep(250);
     }
+    throw Object.assign(new Error(code),{code});
+  }
+
+  async function renderAndCheck(){
+    let lastError;
+    // Retry a cold-load failure once. Never report an uninitialized renderer
+    // as a successful launch or loop indefinitely.
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        await loadAndWaitForRenderer();
+        if(win.isDestroyed())return;
+        if(!win.isVisible())win.show();
+        await sleep(450);
+        if(win.isDestroyed())return;
+        const capture=await win.capturePage();
+        const size=capture.getSize();
+        const colors=countVisualColorBuckets(capture.toBitmap(),size.width,size.height);
+        if(colors<5)throw Object.assign(new Error('UI_BLANK_FRAME'),{code:'UI_BLANK_FRAME'});
+        if(smokeProfile){
+          await writeFile(join(app.getPath('userData'),'ui-smoke-ready.json'),
+            JSON.stringify({status:'UI_READY',painted:true}),'utf8');
+        }
+        return;
+      }catch(error){
+        if(win.isDestroyed())return;
+        lastError=error;
+        if(attempt===0){
+          win.hide();
+          await sleep(300);
+        }
+      }
+    }
+    const known=new Set([
+      'UI_DOCUMENT_MISSING','UI_NOT_VISIBLE','UI_STYLES_MISSING',
+      'UI_RENDERER_NOT_READY','UI_RENDERER_INIT_FAILED','UI_BLANK_FRAME',
+      'UI_LOAD_TIMEOUT'
+    ]);
+    const code=known.has(lastError?.code)?lastError.code:'UI_LOAD_FAILED';
+    if(smokeProfile){
+      // Only fixed codes in the disposable profile, never URLs or text.
+      await writeFile(join(app.getPath('userData'),'ui-smoke-ready.json'),
+        JSON.stringify({status:'UI_FAIL',code}),'utf8').catch(()=>{});
+      return;
+    }
+    const answer=await dialog.showMessageBox({
+      type:'error',
+      title:desktopText('表示エラー','Display error'),
+      message:desktopText('画面の読み込みに失敗しました','Could not render Codex Inventory'),
+      detail:desktopText('診断コード: ','Diagnostic code: ')+code+
+        desktopText('\n再読込しても直らない場合は、このコードのみ共有してください。',
+          '\nIf reloading does not help, share only this diagnostic code.'),
+      buttons:nativeLocale==='en'?['Retry','Close']:['再読込','終了'],
+      defaultId:0,cancelId:1,noLink:true
+    });
+    if(answer.response===0&&!closing&&!win.isDestroyed())void renderAndCheck();
+    else app.quit();
   }
   void renderAndCheck();
 }
